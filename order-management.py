@@ -11,14 +11,12 @@ def create_tables():
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Quotations Header Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quotations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             quote_ref TEXT UNIQUE,
             client_name TEXT,
-            item_details TEXT,
-            unit_price REAL,
-            quantity INTEGER,
             pricing_terms TEXT,
             payment_terms TEXT,
             validity_date TEXT,
@@ -26,6 +24,19 @@ def create_tables():
         )
     ''')
 
+    # Quotations Line Items Table (Supports Multiple Items)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quotation_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_ref TEXT,
+            item_details TEXT,
+            unit_price REAL,
+            quantity INTEGER,
+            FOREIGN KEY (quote_ref) REFERENCES quotations (quote_ref)
+        )
+    ''')
+
+    # LPO Header Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lpos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +50,7 @@ def create_tables():
         )
     ''')
 
+    # LPO Line Items Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lpo_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,6 +63,7 @@ def create_tables():
         )
     ''')
 
+    # Payments Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,19 +83,9 @@ create_tables()
 # --- STREAMLIT UI CONFIGURATION ---
 st.set_page_config(page_title="Order & Quotation Management System", layout="wide")
 
-# Custom CSS styling for a cleaner dashboard look
 st.markdown("""
     <style>
-        .metric-card {
-            background-color: #f8f9fa;
-            border: 1px solid #e9ecef;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-        }
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 10px;
-        }
+        .stTabs [data-baseweb="tab-list"] { gap: 10px; }
         .stTabs [data-baseweb="tab"] {
             height: 40px;
             white-space: pre-wrap;
@@ -114,14 +117,13 @@ conn = get_connection()
 cursor = conn.cursor()
 
 # ==========================================
-# 1. EXECUTIVE DASHBOARD (Redesigned)
+# 1. EXECUTIVE DASHBOARD
 # ==========================================
 if menu == "📊 Executive Dashboard":
     st.title("📊 Executive Business Dashboard")
     st.markdown(f"**Company Profile:** `{COMPANY_NAME}`")
     st.markdown("---")
 
-    # Fetch metric counts
     cursor.execute("SELECT COUNT(*) FROM quotations WHERE status = 'Active'")
     pending_quotes_count = cursor.fetchone()[0]
 
@@ -134,7 +136,6 @@ if menu == "📊 Executive Dashboard":
     cursor.execute("SELECT SUM(amount) FROM payments WHERE status = 'Pending'")
     total_pending_revenue = cursor.fetchone()[0] or 0.0
 
-    # Modern Metric Cards using columns
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.metric(label="⏳ Pending Quotations", value=pending_quotes_count)
@@ -147,7 +148,6 @@ if menu == "📊 Executive Dashboard":
 
     st.markdown("---")
 
-    # Dashboard Layout Layout with Columns / Tabs for cleaner views
     dash_tab1, dash_tab2, dash_tab3 = st.tabs(["📦 Open LPO Tracker", "⏳ Pending Quotations", "✅ Completed LPOs"])
 
     with dash_tab1:
@@ -164,7 +164,6 @@ if menu == "📊 Executive Dashboard":
                     c2.write(f"**Delivery Due:** {lpo[2]}")
                     c3.write(f"**Terms:** {lpo[3]}")
                     
-                    # Fetch items and calculate progress
                     cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo[0],))
                     items = cursor.fetchall()
                     
@@ -180,17 +179,18 @@ if menu == "📊 Executive Dashboard":
                         st.progress(progress)
                     st.markdown("---")
         else:
-            st.info("No open LPOs found right now. All caught up!")
+            st.info("No open LPOs found right now.")
 
     with dash_tab2:
-        st.subheader("Quotations Awaiting LPO Conversion")
-        cursor.execute("SELECT quote_ref, client_name, item_details, quantity, unit_price, validity_date FROM quotations WHERE status = 'Active'")
+        st.subheader("Quotations Awaiting LPO Confirmation")
+        cursor.execute("SELECT quote_ref, client_name, validity_date FROM quotations WHERE status = 'Active'")
         pending_quotes = cursor.fetchall()
         if pending_quotes:
-            st.dataframe(
-                [{"Quote Ref": q[0], "Client": q[1], "Item": q[2], "Qty": q[3], "Unit Price ($)": f"${q[4]:,.2f}", "Valid Until": q[5]} for q in pending_quotes],
-                use_container_width=True
-            )
+            for q in pending_quotes:
+                with st.expander(f"Quote Ref: {q[0]} | Client: {q[1]} | Valid Until: {q[2]}"):
+                    cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (q[0],))
+                    q_items = cursor.fetchall()
+                    st.dataframe([{"Item": i[0], "Unit Price ($)": f"${i[1]:,.2f}", "Quantity": i[2], "Total ($)": f"${i[1]*i[2]:,.2f}"} for i in q_items], use_container_width=True)
         else:
             st.success("No pending quotations awaiting confirmation.")
 
@@ -207,76 +207,76 @@ if menu == "📊 Executive Dashboard":
             st.info("No completed LPOs recorded yet.")
 
 # ==========================================
-# 2. MANAGE QUOTATIONS
+# 2. MANAGE QUOTATIONS (Multi-Item Support)
 # ==========================================
 elif menu == "📝 Manage Quotations":
-    st.title("📝 Quotation Management & Editing")
+    st.title("📝 Quotation Management (Multi-Item Support)")
     
     tab1, tab2 = st.tabs(["Create Quotation", "View / Edit Quotations"])
 
     with tab1:
-        st.subheader("Create New Quotation (Duplication Protected)")
+        st.subheader("Create New Quotation with Multiple Items")
+        
         with st.form("create_quote_form"):
             col1, col2 = st.columns(2)
             with col1:
                 q_ref = st.text_input("Quotation Reference (e.g., QT-2026-001)")
                 client = st.text_input("Client Name")
-                item_details = st.text_input("Item Details / Description")
-                unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=10.0)
             with col2:
-                quantity = st.number_input("Quantity", min_value=1, step=1)
                 pricing_terms = st.text_input("Pricing Terms", value="Fixed pricing")
                 payment_terms = st.text_input("Payment Terms", value="Net 30")
                 validity_date = st.date_input("Validity Date")
 
+            st.markdown("---")
+            st.markdown("### Item Lines")
+            
+            # Use session state or dynamic inputs for multi-items in form
+            num_items = st.number_input("How many item lines to add?", min_value=1, max_value=10, value=2)
+            
+            item_data = []
+            for i in range(int(num_items)):
+                cols = st.columns([3, 1, 1])
+                it_name = cols[0].text_input(f"Item #{i+1} Description", key=f"item_{i}")
+                it_price = cols[1].number_input(f"Unit Price #{i+1}", min_value=0.0, step=10.0, key=f"price_{i}")
+                it_qty = cols[2].number_input(f"Qty #{i+1}", min_value=1, value=1, key=f"qty_{i}")
+                item_data.append((it_name, it_price, it_qty))
+
             submitted = st.form_submit_button("Save Quotation")
             if submitted:
                 try:
+                    # Save Header
                     cursor.execute('''
-                        INSERT INTO quotations (quote_ref, client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date, status)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active')
-                    ''', (q_ref, client, item_details, unit_price, quantity, pricing_terms, payment_terms, str(validity_date)))
+                        INSERT INTO quotations (quote_ref, client_name, pricing_terms, payment_terms, validity_date, status)
+                        VALUES (?, ?, ?, ?, ?, 'Active')
+                    ''', (q_ref, client, pricing_terms, payment_terms, str(validity_date)))
+
+                    # Save Line Items
+                    for it_name, it_price, it_qty in item_data:
+                        if it_name.strip():
+                            cursor.execute('''
+                                INSERT INTO quotation_items (quote_ref, item_details, unit_price, quantity)
+                                VALUES (?, ?, ?, ?)
+                            ''', (q_ref, it_name, it_price, it_qty))
+
                     conn.commit()
-                    st.success(f"Quotation '{q_ref}' created successfully!")
+                    st.success(f"Quotation '{q_ref}' with multiple items created successfully!")
                 except sqlite3.IntegrityError:
                     st.error(f"Error: Quotation reference '{q_ref}' already exists. Duplication prevented!")
 
     with tab2:
-        st.subheader("Existing Quotations & Corrections")
-        cursor.execute("SELECT * FROM quotations")
+        st.subheader("Existing Quotations & Item Lines")
+        cursor.execute("SELECT quote_ref, client_name, pricing_terms, payment_terms, validity_date, status FROM quotations")
         all_quotes = cursor.fetchall()
         
         if all_quotes:
-            st.dataframe([{
-                "ID": r[0], "Ref": r[1], "Client": r[2], "Item": r[3], 
-                "Price": f"${r[4]:,.2f}", "Qty": r[5], "Valid Until": r[8], "Status": r[9]
-            } for r in all_quotes], use_container_width=True)
-
-            st.markdown("### Edit / Correct Quotation")
-            selected_ref = st.selectbox("Select Quotation Ref to Edit", [r[1] for r in all_quotes])
-            
-            cursor.execute("SELECT * FROM quotations WHERE quote_ref = ?", (selected_ref,))
-            q_data = cursor.fetchone()
-
-            with st.form("edit_quote_form"):
-                new_client = st.text_input("Client Name", value=q_data[2])
-                new_item = st.text_input("Item Details", value=q_data[3])
-                new_price = st.number_input("Unit Price ($)", value=float(q_data[4]))
-                new_qty = st.number_input("Quantity", value=int(q_data[5]))
-                new_pricing = st.text_input("Pricing Terms", value=q_data[6])
-                new_payment = st.text_input("Payment Terms", value=q_data[7])
-                new_status = st.selectbox("Status", ["Active", "Confirmed", "Cancelled"], index=0 if q_data[9]=="Active" else 1)
-
-                update_btn = st.form_submit_button("Update Quotation")
-                if update_btn:
-                    cursor.execute('''
-                        UPDATE quotations 
-                        SET client_name = ?, item_details = ?, unit_price = ?, quantity = ?, pricing_terms = ?, payment_terms = ?, status = ?
-                        WHERE quote_ref = ?
-                    ''', (new_client, new_item, new_price, new_qty, new_pricing, new_payment, new_status, selected_ref))
-                    conn.commit()
-                    st.success(f"Quotation '{selected_ref}' updated successfully!")
-                    st.rerun()
+            for q in all_quotes:
+                with st.expander(f"Ref: {q[0]} | Client: {q[1]} | Status: {q[5]}"):
+                    st.write(f"**Pricing Terms:** {q[2]} | **Payment Terms:** {q[3]} | **Valid Until:** {q[4]}")
+                    cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (q[0],))
+                    items = cursor.fetchall()
+                    st.dataframe([{"Item": i[0], "Unit Price ($)": f"${i[1]:,.2f}", "Qty": i[2], "Total ($)": f"${i[1]*i[2]:,.2f}"} for i in items], use_container_width=True)
+        else:
+            st.info("No quotations found.")
 
 # ==========================================
 # 3. LPO & DELIVERIES
@@ -299,13 +299,8 @@ elif menu == "📦 LPO & Deliveries":
                 selected_quote = st.selectbox("Select Quotation Reference", active_quotes)
                 delivery_sched = st.date_input("Delivery Schedule Date")
                 lpo_payment_terms = st.text_input("LPO Payment Terms", value="Net 30")
-                
-                st.markdown("---")
-                st.markdown("**LPO Item Setup**")
-                item_name = st.text_input("Item Name / Description")
-                ordered_qty = st.number_input("Ordered Quantity", min_value=1, value=1)
 
-                lpo_submit = st.form_submit_button("Generate LPO")
+                lpo_submit = st.form_submit_button("Generate LPO From Quotation Items")
                 if lpo_submit:
                     try:
                         cursor.execute("SELECT client_name FROM quotations WHERE quote_ref = ?", (selected_quote,))
@@ -316,14 +311,19 @@ elif menu == "📦 LPO & Deliveries":
                             VALUES (?, ?, ?, ?, ?, 'Open')
                         ''', (lpo_num, selected_quote, client_name, str(delivery_sched), lpo_payment_terms))
 
-                        cursor.execute('''
-                            INSERT INTO lpo_items (lpo_number, item_name, ordered_qty, delivered_qty, balance_qty)
-                            VALUES (?, ?, ?, 0, ?)
-                        ''', (lpo_num, item_name, ordered_qty, ordered_qty))
+                        # Pull all line items from the quotation automatically
+                        cursor.execute("SELECT item_details, quantity FROM quotation_items WHERE quote_ref = ?", (selected_quote,))
+                        quote_items = cursor.fetchall()
+
+                        for it_name, it_qty in quote_items:
+                            cursor.execute('''
+                                INSERT INTO lpo_items (lpo_number, item_name, ordered_qty, delivered_qty, balance_qty)
+                                VALUES (?, ?, ?, 0, ?)
+                            ''', (lpo_num, it_name, it_qty, it_qty))
 
                         cursor.execute("UPDATE quotations SET status = 'Confirmed' WHERE quote_ref = ?", (selected_quote,))
                         conn.commit()
-                        st.success(f"LPO '{lpo_num}' created successfully!")
+                        st.success(f"LPO '{lpo_num}' created successfully with all quotation line items!")
                     except sqlite3.IntegrityError:
                         st.error(f"Error: LPO Number '{lpo_num}' already exists.")
 
