@@ -1,430 +1,477 @@
+import streamlit as st
 import sqlite3
 from datetime import datetime
 
-class OrderManagementSystem:
-    def __init__(self, db_name="business_tracker.db", company_name="MY COMPANY NAME LLC", company_address="123 Business Ave, Suite 100 | Phone: +1 234 567 8900 | Email: info@mycompany.com"):
-        self.conn = sqlite3.connect(db_name)
-        self.cursor = self.conn.cursor()
-        self.company_name = company_name
-        self.company_address = company_address
-        self.create_tables()
+# --- DATABASE SETUP ---
+def get_connection():
+    # check_same_thread=False allows Streamlit to handle SQLite across threads safely
+    conn = sqlite3.connect("business_tracker.db", check_same_thread=False)
+    return conn
 
-    def create_tables(self):
-        """Creates the necessary database tables if they don't exist."""
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS quotations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                quote_ref TEXT UNIQUE,
-                client_name TEXT,
-                item_details TEXT,
-                unit_price REAL,
-                quantity INTEGER,
-                pricing_terms TEXT,
-                payment_terms TEXT,
-                validity_date TEXT,
-                status TEXT DEFAULT 'Active'
-            )
-        ''')
+def create_tables():
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS quotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            quote_ref TEXT UNIQUE,
+            client_name TEXT,
+            item_details TEXT,
+            unit_price REAL,
+            quantity INTEGER,
+            pricing_terms TEXT,
+            payment_terms TEXT,
+            validity_date TEXT,
+            status TEXT DEFAULT 'Active'
+        )
+    ''')
 
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS lpos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lpo_number TEXT UNIQUE,
-                quote_ref TEXT,
-                client_name TEXT,
-                delivery_schedule TEXT,
-                payment_terms TEXT,
-                status TEXT DEFAULT 'Open',
-                FOREIGN KEY (quote_ref) REFERENCES quotations (quote_ref)
-            )
-        ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS lpos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lpo_number TEXT UNIQUE,
+            quote_ref TEXT,
+            client_name TEXT,
+            delivery_schedule TEXT,
+            payment_terms TEXT,
+            status TEXT DEFAULT 'Open',
+            FOREIGN KEY (quote_ref) REFERENCES quotations (quote_ref)
+        )
+    ''')
 
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS lpo_items (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lpo_number TEXT,
-                item_name TEXT,
-                ordered_qty INTEGER,
-                delivered_qty INTEGER DEFAULT 0,
-                balance_qty INTEGER,
-                FOREIGN KEY (lpo_number) REFERENCES lpos (lpo_number)
-            )
-        ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS lpo_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lpo_number TEXT,
+            item_name TEXT,
+            ordered_qty INTEGER,
+            delivered_qty INTEGER DEFAULT 0,
+            balance_qty INTEGER,
+            FOREIGN KEY (lpo_number) REFERENCES lpos (lpo_number)
+        )
+    ''')
 
-        self.cursor.execute('''
-            CREATE TABLE IF NOT EXISTS payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                lpo_number TEXT,
-                term_description TEXT,
-                due_date TEXT,
-                amount REAL,
-                status TEXT DEFAULT 'Pending',
-                FOREIGN KEY (lpo_number) REFERENCES lpos (lpo_number)
-            )
-        ''')
-        self.conn.commit()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lpo_number TEXT,
+            term_description TEXT,
+            due_date TEXT,
+            amount REAL,
+            status TEXT DEFAULT 'Pending',
+            FOREIGN KEY (lpo_number) REFERENCES lpos (lpo_number)
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-    # --- 1. QUOTATION TRACKING & EDITING ---
-    def create_quotation(self, quote_ref, client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date):
-        self.cursor.execute("SELECT id FROM quotations WHERE quote_ref = ?", (quote_ref,))
-        if self.cursor.fetchone():
-            print(f"❌ Error: Quotation reference '{quote_ref}' already exists. Duplication prevented.")
-            return False
+create_tables()
 
-        try:
-            self.cursor.execute('''
-                INSERT INTO quotations (quote_ref, client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active')
-            ''', (quote_ref, client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date))
-            self.conn.commit()
-            print(f"✅ Quotation '{quote_ref}' successfully created.")
-            return True
-        except Exception as e:
-            print(f"❌ Error creating quotation: {e}")
-            return False
+# --- STREAMLIT UI CONFIGURATION ---
+st.set_page_config(page_title="Order & Quotation Management System", layout="wide")
 
-    def edit_quotation(self, quote_ref, client_name=None, item_details=None, unit_price=None, quantity=None, pricing_terms=None, payment_terms=None, validity_date=None, status=None):
-        self.cursor.execute("SELECT * FROM quotations WHERE quote_ref = ?", (quote_ref,))
-        row = self.cursor.fetchone()
-        if not row:
-            print(f"❌ Error: Quotation '{quote_ref}' not found.")
-            return False
+COMPANY_NAME = "MY COMPANY NAME LLC"
+COMPANY_ADDRESS = "123 Business Ave, Suite 100 | Phone: +1 234 567 8900 | Email: info@mycompany.com"
 
-        client_name = client_name or row[2]
-        item_details = item_details or row[3]
-        unit_price = unit_price if unit_price is not None else row[4]
-        quantity = quantity if quantity is not None else row[5]
-        pricing_terms = pricing_terms or row[6]
-        payment_terms = payment_terms or row[7]
-        validity_date = validity_date or row[8]
-        status = status or row[9]
+st.sidebar.title("Navigation")
+menu = st.sidebar.selectbox("Go to", [
+    "📊 Executive Dashboard", 
+    "📝 Manage Quotations", 
+    "📦 LPO & Deliveries", 
+    "💰 Payment Tracking", 
+    "🖨️ Print Documents"
+])
 
-        try:
-            self.cursor.execute('''
-                UPDATE quotations 
-                SET client_name = ?, item_details = ?, unit_price = ?, quantity = ?, pricing_terms = ?, payment_terms = ?, validity_date = ?, status = ?
-                WHERE quote_ref = ?
-            ''', (client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date, status, quote_ref))
-            self.conn.commit()
-            print(f"✏️ Quotation '{quote_ref}' successfully updated.")
-            return True
-        except Exception as e:
-            print(f"❌ Error updating quotation: {e}")
-            return False
+conn = get_connection()
+cursor = conn.cursor()
 
-    def view_quotations(self):
-        self.cursor.execute("SELECT * FROM quotations")
-        rows = self.cursor.fetchall()
-        print("\n--- QUOTATIONS ---")
-        for row in rows:
-            print(f"Ref: {row[1]} | Client: {row[2]} | Item: {row[3]} | Qty: {row[5]} | Price: ${row[4]} | Valid Until: {row[8]} | Status: {row[9]}")
+# ==========================================
+# 1. EXECUTIVE DASHBOARD
+# ==========================================
+if menu == "📊 Executive Dashboard":
+    st.title("📊 Executive Business Dashboard")
+    st.markdown(f"**Company:** {COMPANY_NAME}")
+    st.markdown("---")
 
-    # --- 2. LPO & DELIVERY TRACKING & EDITING ---
-    def create_lpo(self, lpo_number, quote_ref, delivery_schedule, payment_terms, items):
-        self.cursor.execute("SELECT client_name, validity_date FROM quotations WHERE quote_ref = ?", (quote_ref,))
-        quote = self.cursor.fetchone()
-        if not quote:
-            print(f"❌ Error: Quotation reference '{quote_ref}' not found.")
-            return False
+    # Metrics overview
+    cursor.execute("SELECT COUNT(*) FROM quotations WHERE status = 'Active'")
+    pending_quotes_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM lpos WHERE status = 'Open'")
+    open_lpos_count = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM lpos WHERE status = 'Fulfilled'")
+    fulfilled_lpos_count = cursor.fetchone()[0]
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Pending Quotations", pending_quotes_count)
+    col2.metric("Open / Pending LPOs", open_lpos_count)
+    col3.metric("Completed LPOs", fulfilled_lpos_count)
+    st.markdown("---")
+
+    # Section 1: Pending Quotations
+    st.subheader("⏳ Pending Quotations (Awaiting LPO Confirmation)")
+    cursor.execute("SELECT quote_ref, client_name, item_details, quantity, unit_price, validity_date FROM quotations WHERE status = 'Active'")
+    pending_quotes = cursor.fetchall()
+    if pending_quotes:
+        st.dataframe(
+            [{"Quote Ref": q[0], "Client": q[1], "Item": q[2], "Qty": q[3], "Unit Price ($)": q[4], "Valid Until": q[5]} for q in pending_quotes],
+            use_container_width=True
+        )
+    else:
+        st.info("No pending quotations found.")
+
+    # Section 2: Open LPOs
+    st.subheader("📦 Pending / Open LPOs (Active Deliveries & Balances)")
+    cursor.execute("SELECT lpo_number, client_name, delivery_schedule, payment_terms FROM lpos WHERE status = 'Open'")
+    open_lpos = cursor.fetchall()
+    if open_lpos:
+        for lpo in open_lpos:
+            with st.expander(f"LPO: {lpo[0]} | Client: {lpo[1]} | Schedule: {lpo[2]}"):
+                st.write(f"**Payment Terms:** {lpo[3]}")
+                cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo[0],))
+                items = cursor.fetchall()
+                st.dataframe(
+                    [{"Item": i[0], "Ordered": i[1], "Delivered": i[2], "Balance Remaining": i[3]} for i in items],
+                    use_container_width=True
+                )
+    else:
+        st.info("No open LPOs found.")
+
+    # Section 3: Fulfilled LPOs
+    st.subheader("✅ Completed / Fulfilled LPOs")
+    cursor.execute("SELECT lpo_number, client_name, delivery_schedule FROM lpos WHERE status = 'Fulfilled'")
+    fulfilled_lpos = cursor.fetchall()
+    if fulfilled_lpos:
+        st.dataframe(
+            [{"LPO Number": f[0], "Client": f[1], "Delivery Schedule": f[2]} for f in fulfilled_lpos],
+            use_container_width=True
+        )
+    else:
+        st.info("No completed LPOs found.")
+
+# ==========================================
+# 2. MANAGE QUOTATIONS
+# ==========================================
+elif menu == "📝 Manage Quotations":
+    st.title("📝 Quotation Management & Editing")
+    
+    tab1, tab2 = st.tabs(["Create Quotation", "View / Edit Quotations"])
+
+    with tab1:
+        st.subheader("Create New Quotation (Duplication Protected)")
+        with st.form("create_quote_form"):
+            q_ref = st.text_input("Quotation Reference (e.g., QT-2026-001)")
+            client = st.text_input("Client Name")
+            item_details = st.text_input("Item Details / Description")
+            unit_price = st.number_input("Unit Price ($)", min_value=0.0, step=10.0)
+            quantity = st.number_input("Quantity", min_value=1, step=1)
+            pricing_terms = st.text_input("Pricing Terms", value="Fixed pricing")
+            payment_terms = st.text_input("Payment Terms", value="Net 30")
+            validity_date = st.date_input("Validity Date")
+
+            submitted = st.form_submit_button("Save Quotation")
+            if submitted:
+                try:
+                    cursor.execute('''
+                        INSERT INTO quotations (quote_ref, client_name, item_details, unit_price, quantity, pricing_terms, payment_terms, validity_date, status)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Active')
+                    ''', (q_ref, client, item_details, unit_price, quantity, pricing_terms, payment_terms, str(validity_date)))
+                    conn.commit()
+                    st.success(f"Quotation '{q_ref}' created successfully!")
+                except sqlite3.IntegrityError:
+                    st.error(f"Error: Quotation reference '{q_ref}' already exists. Duplication prevented!")
+
+    with tab2:
+        st.subheader("Existing Quotations & Corrections")
+        cursor.execute("SELECT * FROM quotations")
+        all_quotes = cursor.fetchall()
         
-        client_name = quote[0]
-        try:
-            self.cursor.execute('''
-                INSERT INTO lpos (lpo_number, quote_ref, client_name, delivery_schedule, payment_terms, status)
-                VALUES (?, ?, ?, ?, ?, 'Open')
-            ''', (lpo_number, quote_ref, client_name, delivery_schedule, payment_terms))
+        if all_quotes:
+            st.dataframe([{
+                "ID": r[0], "Ref": r[1], "Client": r[2], "Item": r[3], 
+                "Price": r[4], "Qty": r[5], "Valid Until": r[8], "Status": r[9]
+            } for r in all_quotes], use_container_width=True)
 
-            for item_name, ordered_qty in items.items():
-                self.cursor.execute('''
-                    INSERT INTO lpo_items (lpo_number, item_name, ordered_qty, delivered_qty, balance_qty)
-                    VALUES (?, ?, ?, 0, ?)
-                ''', (lpo_number, item_name, ordered_qty, ordered_qty))
+            st.markdown("### Edit / Correct Quotation")
+            selected_ref = st.selectbox("Select Quotation Ref to Edit", [r[1] for r in all_quotes])
+            
+            cursor.execute("SELECT * FROM quotations WHERE quote_ref = ?", (selected_ref,))
+            q_data = cursor.fetchone()
 
-            # Automatically mark quotation status as 'Confirmed' once an LPO is generated from it
-            self.cursor.execute("UPDATE quotations SET status = 'Confirmed' WHERE quote_ref = ?", (quote_ref,))
+            with st.form("edit_quote_form"):
+                new_client = st.text_input("Client Name", value=q_data[2])
+                new_item = st.text_input("Item Details", value=q_data[3])
+                new_price = st.number_input("Unit Price ($)", value=float(q_data[4]))
+                new_qty = st.number_input("Quantity", value=int(q_data[5]))
+                new_pricing = st.text_input("Pricing Terms", value=q_data[6])
+                new_payment = st.text_input("Payment Terms", value=q_data[7])
+                new_status = st.selectbox("Status", ["Active", "Confirmed", "Cancelled"], index=0 if q_data[9]=="Active" else 1)
 
-            self.conn.commit()
-            print(f"✅ LPO '{lpo_number}' created successfully (Quotation '{quote_ref}' marked as Confirmed).")
-            return True
-        except Exception as e:
-            print(f"❌ Error creating LPO: {e}")
-            return False
+                update_btn = st.form_submit_button("Update Quotation")
+                if update_btn:
+                    cursor.execute('''
+                        UPDATE quotations 
+                        SET client_name = ?, item_details = ?, unit_price = ?, quantity = ?, pricing_terms = ?, payment_terms = ?, status = ?
+                        WHERE quote_ref = ?
+                    ''', (new_client, new_item, new_price, new_qty, new_pricing, new_payment, new_status, selected_ref))
+                    conn.commit()
+                    st.success(f"Quotation '{selected_ref}' updated successfully!")
+                    st.rerun()
 
-    def edit_lpo_item_quantity(self, lpo_number, item_name, new_ordered_qty):
-        self.cursor.execute('''
-            SELECT ordered_qty, delivered_qty FROM lpo_items 
-            WHERE lpo_number = ? AND item_name = ?
-        ''', (lpo_number, item_name))
-        item = self.cursor.fetchone()
+# ==========================================
+# 3. LPO & DELIVERIES
+# ==========================================
+elif menu == "📦 LPO & Deliveries":
+    st.title("📦 LPO Tracking, Schedules & Deliveries")
 
-        if not item:
-            print(f"❌ Error: Item '{item_name}' not found under LPO '{lpo_number}'.")
-            return False
+    tab1, tab2, tab3 = st.tabs(["Create LPO", "Record Delivery", "Edit LPO Quantities"])
 
-        _, current_delivered = item
-        if new_ordered_qty < current_delivered:
-            print(f"❌ Error: New ordered quantity ({new_ordered_qty}) cannot be less than delivered quantity ({current_delivered}).")
-            return False
+    with tab1:
+        st.subheader("Convert Quotation to LPO")
+        cursor.execute("SELECT quote_ref FROM quotations WHERE status = 'Active'")
+        active_quotes = [row[0] for row in cursor.fetchall()]
 
-        new_balance = new_ordered_qty - current_delivered
-        try:
-            self.cursor.execute('''
-                UPDATE lpo_items 
-                SET ordered_qty = ?, balance_qty = ? 
-                WHERE lpo_number = ? AND item_name = ?
-            ''', (new_ordered_qty, new_balance, lpo_number, item_name))
-            self.conn.commit()
-            print(f"✏️ LPO item '{item_name}' corrected. New Ordered Qty: {new_ordered_qty}, Balance: {new_balance}")
-            return True
-        except Exception as e:
-            print(f"❌ Error updating LPO item quantity: {e}")
-            return False
-
-    def record_delivery(self, lpo_number, item_name, qty_delivered):
-        self.cursor.execute('''
-            SELECT ordered_qty, delivered_qty FROM lpo_items 
-            WHERE lpo_number = ? AND item_name = ?
-        ''', (lpo_number, item_name))
-        item = self.cursor.fetchone()
-
-        if not item:
-            print(f"❌ Error: Item '{item_name}' not found under LPO '{lpo_number}'.")
-            return
-
-        ordered, current_delivered = item
-        new_delivered = current_delivered + qty_delivered
-        new_balance = ordered - new_delivered
-
-        if new_balance < 0:
-            print(f"❌ Error: Delivered quantity exceeds ordered quantity for '{item_name}'.")
-            return
-
-        self.cursor.execute('''
-            UPDATE lpo_items 
-            SET delivered_qty = ?, balance_qty = ? 
-            WHERE lpo_number = ? AND item_name = ?
-        ''', (new_delivered, new_balance, lpo_number, item_name))
-        
-        # Check if entire LPO is fulfilled
-        self.cursor.execute("SELECT SUM(balance_qty) FROM lpo_items WHERE lpo_number = ?", (lpo_number,))
-        total_balance = self.cursor.fetchone()[0]
-        if total_balance == 0:
-            self.cursor.execute("UPDATE lpos SET status = 'Fulfilled' WHERE lpo_number = ?", (lpo_number,))
-
-        self.conn.commit()
-        print(f"📦 Delivery recorded for '{item_name}': +{qty_delivered}. New Balance: {new_balance}")
-
-    def track_lpo_deliveries(self, lpo_number):
-        self.cursor.execute("SELECT * FROM lpos WHERE lpo_number = ?", (lpo_number,))
-        lpo = self.cursor.fetchone()
-        if not lpo:
-            print(f"❌ LPO '{lpo_number}' not found.")
-            return
-
-        print(f"\n--- LPO STATUS: {lpo[1]} (Client: {lpo[3]}) ---")
-        print(f"Delivery Schedule: {lpo[4]} | Payment Terms: {lpo[5]} | Status: {lpo[6]}")
-        
-        self.cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo_number,))
-        items = self.cursor.fetchall()
-        print("Items Breakdown:")
-        for item in items:
-            print(f"  • {item[0]} | Ordered: {item[1]} | Delivered: {item[2]} | Balance: {item[3]}")
-
-    # --- 3. PAYMENT TERM TRACKING & EDITING ---
-    def add_payment_schedule(self, lpo_number, term_description, due_date, amount):
-        try:
-            self.cursor.execute('''
-                INSERT INTO payments (lpo_number, term_description, due_date, amount, status)
-                VALUES (?, ?, ?, ?, 'Pending')
-            ''', (lpo_number, term_description, due_date, amount))
-            self.conn.commit()
-            print(f"💰 Payment term added for LPO '{lpo_number}': {term_description} (${amount}) due on {due_date}")
-        except Exception as e:
-            print(f"❌ Error adding payment schedule: {e}")
-
-    def edit_payment_term(self, payment_id, term_description=None, due_date=None, amount=None, status=None):
-        self.cursor.execute("SELECT * FROM payments WHERE id = ?", (payment_id,))
-        p = self.cursor.fetchone()
-        if not p:
-            print(f"❌ Error: Payment ID {payment_id} not found.")
-            return False
-
-        term_description = term_description or p[2]
-        due_date = due_date or p[3]
-        amount = amount if amount is not None else p[4]
-        status = status or p[5]
-
-        try:
-            self.cursor.execute('''
-                UPDATE payments 
-                SET term_description = ?, due_date = ?, amount = ?, status = ?
-                WHERE id = ?
-            ''', (term_description, due_date, amount, status, payment_id))
-            self.conn.commit()
-            print(f"✏️ Payment ID {payment_id} successfully updated.")
-            return True
-        except Exception as e:
-            print(f"❌ Error updating payment term: {e}")
-            return False
-
-    def track_payments(self, lpo_number):
-        self.cursor.execute("SELECT id, term_description, due_date, amount, status FROM payments WHERE lpo_number = ?", (lpo_number,))
-        payments = self.cursor.fetchall()
-        print(f"\n--- PAYMENT TERMS FOR LPO: {lpo_number} ---")
-        for p in payments:
-            print(f"ID: {p[0]} | Term: {p[1]} | Due: {p[2]} | Amount: ${p[3]} | Status: {p[4]}")
-
-    # --- 4. BUSINESS DASHBOARD ---
-    def show_dashboard(self):
-        """Displays an operational dashboard showing Pending LPOs, Completed LPOs, and Pending Quotations."""
-        print("\n" + "=" * 90)
-        print(f" {self.company_name} - EXECUTIVE BUSINESS DASHBOARD ".center(90, "="))
-        print("=" * 90)
-
-        # 1. Pending Quotations Awaiting Confirmation
-        print("\n⏳ PENDING QUOTATIONS (Awaiting LPO Confirmation):")
-        print("-" * 90)
-        self.cursor.execute("SELECT quote_ref, client_name, item_details, quantity, validity_date FROM quotations WHERE status = 'Active'")
-        pending_quotes = self.cursor.fetchall()
-        if not pending_quotes:
-            print("  (No pending quotations found)")
+        if not active_quotes:
+            st.warning("No active quotations available to build an LPO from.")
         else:
-            print(f"{'Quote Ref':<15} | {'Client Name':<20} | {'Item Details':<25} | {'Qty':<5} | {'Valid Until'}")
-            print("-" * 90)
-            for q in pending_quotes:
-                print(f"{q[0]:<15} | {q[1]:<20} | {q[2]:<25} | {q[3]:<5} | {q[4]}")
+            with st.form("create_lpo_form"):
+                lpo_num = st.text_input("LPO Number (e.g., LPO-9988)")
+                selected_quote = st.selectbox("Select Quotation Reference", active_quotes)
+                delivery_sched = st.date_input("Delivery Schedule Date")
+                lpo_payment_terms = st.text_input("LPO Payment Terms", value="Net 30")
+                
+                st.markdown("---")
+                st.markdown("**LPO Item Setup**")
+                item_name = st.text_input("Item Name / Description")
+                ordered_qty = st.number_input("Ordered Quantity", min_value=1, value=1)
 
-        # 2. Pending / Open LPOs
-        print("\n📦 PENDING / OPEN LPOS (Active Deliveries & Balances):")
-        print("-" * 90)
-        self.cursor.execute("SELECT lpo_number, client_name, delivery_schedule, payment_terms FROM lpos WHERE status = 'Open'")
-        open_lpos = self.cursor.fetchall()
+                lpo_submit = st.form_submit_button("Generate LPO")
+                if lpo_submit:
+                    try:
+                        cursor.execute("SELECT client_name FROM quotations WHERE quote_ref = ?", (selected_quote,))
+                        client_name = cursor.fetchone()[0]
+
+                        cursor.execute('''
+                            INSERT INTO lpos (lpo_number, quote_ref, client_name, delivery_schedule, payment_terms, status)
+                            VALUES (?, ?, ?, ?, ?, 'Open')
+                        ''', (lpo_num, selected_quote, client_name, str(delivery_sched), lpo_payment_terms))
+
+                        cursor.execute('''
+                            INSERT INTO lpo_items (lpo_number, item_name, ordered_qty, delivered_qty, balance_qty)
+                            VALUES (?, ?, ?, 0, ?)
+                        ''', (lpo_num, item_name, ordered_qty, ordered_qty))
+
+                        cursor.execute("UPDATE quotations SET status = 'Confirmed' WHERE quote_ref = ?", (selected_quote,))
+                        conn.commit()
+                        st.success(f"LPO '{lpo_num}' created successfully!")
+                    except sqlite3.IntegrityError:
+                        st.error(f"Error: LPO Number '{lpo_num}' already exists.")
+
+    with tab2:
+        st.subheader("Record Delivery & Track Balance")
+        cursor.execute("SELECT lpo_number FROM lpos WHERE status = 'Open'")
+        open_lpos = [row[0] for row in cursor.fetchall()]
+
         if not open_lpos:
-            print("  (No open LPOs found)")
+            st.info("No open LPOs available for delivery tracking.")
         else:
-            for lpo in open_lpos:
-                print(f"• LPO: {lpo[0]} | Client: {lpo[1]} | Schedule: {lpo[2]} | Terms: {lpo[3]}")
-                # Fetch item breakdown and balances
-                self.cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo[0],))
-                items = self.cursor.fetchall()
-                for item in items:
-                    print(f"    - [{item[0]}] -> Ordered: {item[1]} | Delivered: {item[2]} | Balance Remaining: {item[3]}")
+            selected_lpo = st.selectbox("Select Open LPO", open_lpos)
+            
+            cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (selected_lpo,))
+            items = cursor.fetchall()
 
-        # 3. Completed / Fulfilled LPOs
-        print("\n✅ COMPLETED / FULFILLED LPOS:")
-        print("-" * 90)
-        self.cursor.execute("SELECT lpo_number, client_name, delivery_schedule FROM lpos WHERE status = 'Fulfilled'")
-        fulfilled_lpos = self.cursor.fetchall()
-        if not fulfilled_lpos:
-            print("  (No completed LPOs found)")
+            for item in items:
+                st.write(f"**Item:** {item[0]} | Ordered: {item[1]} | Delivered: {item[2]} | **Balance:** {item[3]}")
+
+            with st.form("delivery_form"):
+                item_to_deliver = st.selectbox("Select Item to Deliver", [i[0] for i in items])
+                qty_del = st.number_input("Quantity Being Delivered Now", min_value=1, step=1)
+                del_submit = st.form_submit_button("Confirm Delivery")
+
+                if del_submit:
+                    cursor.execute("SELECT ordered_qty, delivered_qty FROM lpo_items WHERE lpo_number = ? AND item_name = ?", (selected_lpo, item_to_deliver))
+                    ord_q, del_q = cursor.fetchone()
+                    new_del = del_q + qty_del
+                    new_bal = ord_q - new_del
+
+                    if new_bal < 0:
+                        st.error("Error: Delivered quantity cannot exceed ordered quantity!")
+                    else:
+                        cursor.execute("UPDATE lpo_items SET delivered_qty = ?, balance_qty = ? WHERE lpo_number = ? AND item_name = ?", 
+                                       (new_del, new_bal, selected_lpo, item_to_deliver))
+                        
+                        # Check if fully fulfilled
+                        cursor.execute("SELECT SUM(balance_qty) FROM lpo_items WHERE lpo_number = ?", (selected_lpo,))
+                        total_bal = cursor.fetchone()[0]
+                        if total_bal == 0:
+                            cursor.execute("UPDATE lpos SET status = 'Fulfilled' WHERE lpo_number = ?", (selected_lpo,))
+                        
+                        conn.commit()
+                        st.success(f"Delivery logged! New balance for {item_to_deliver}: {new_bal}")
+                        st.rerun()
+
+    with tab3:
+        st.subheader("Correct / Edit LPO Ordered Quantities")
+        cursor.execute("SELECT lpo_number FROM lpos")
+        all_lpos = [row[0] for row in cursor.fetchall()]
+        if all_lpos:
+            edit_lpo = st.selectbox("Select LPO to Edit Items", all_lpos, key="edit_lpo_sel")
+            cursor.execute("SELECT item_name, ordered_qty, delivered_qty FROM lpo_items WHERE lpo_number = ?", (edit_lpo,))
+            lpo_itms = cursor.fetchall()
+
+            with st.form("edit_lpo_qty_form"):
+                target_item = st.selectbox("Select Item", [i[0] for i in lpo_itms])
+                new_ordered = st.number_input("New Corrected Ordered Quantity", min_value=1, step=1)
+                corr_sub = st.form_submit_button("Save Quantity Correction")
+
+                if corr_sub:
+                    # fetch current delivered
+                    cursor.execute("SELECT delivered_qty FROM lpo_items WHERE lpo_number = ? AND item_name = ?", (edit_lpo, target_item))
+                    current_del = cursor.fetchone()[0]
+                    if new_ordered < current_del:
+                        st.error(f"Cannot set ordered qty below already delivered quantity ({current_del}).")
+                    else:
+                        new_balance = new_ordered - current_del
+                        cursor.execute("UPDATE lpo_items SET ordered_qty = ?, balance_qty = ? WHERE lpo_number = ? AND item_name = ?", 
+                                       (new_ordered, new_balance, edit_lpo, target_item))
+                        conn.commit()
+                        st.success("LPO item quantity corrected successfully!")
+                        st.rerun()
+
+# ==========================================
+# 4. PAYMENT TRACKING
+# ==========================================
+elif menu == "💰 Payment Tracking":
+    st.title("💰 LPO Payment Terms & Milestone Tracking")
+
+    tab1, tab2 = st.tabs(["Add Payment Milestone", "Track & Update Payments"])
+
+    cursor.execute("SELECT lpo_number FROM lpos")
+    all_lpos = [row[0] for row in cursor.fetchall()]
+
+    with tab1:
+        st.subheader("Add Payment Milestone / Terms")
+        if not all_lpos:
+            st.warning("Create an LPO first.")
         else:
-            print(f"{'LPO Number':<15} | {'Client Name':<25} | {'Delivery Schedule'}")
-            print("-" * 90)
-            for f in fulfilled_lpos:
-                print(f"{f[0]:<15} | {f[1]:<25} | {f[2]}")
+            with st.form("payment_schedule_form"):
+                pay_lpo = st.selectbox("Select LPO Number", all_lpos)
+                term_desc = st.text_input("Term Description (e.g., 50% Advance, Net 30)")
+                due_date = st.date_input("Due Date")
+                amount = st.number_input("Amount ($)", min_value=0.0, step=100.0)
+                
+                pay_sub = st.form_submit_button("Add Payment Milestone")
+                if pay_sub:
+                    cursor.execute('''
+                        INSERT INTO payments (lpo_number, term_description, due_date, amount, status)
+                        VALUES (?, ?, ?, ?, 'Pending')
+                    ''', (pay_lpo, term_desc, str(due_date), amount))
+                    conn.commit()
+                    st.success("Payment milestone added successfully!")
 
-        print("=" * 90 + "\n")
+    with tab2:
+        st.subheader("Manage Payment Status & Corrections")
+        if all_lpos:
+            selected_pay_lpo = st.selectbox("Filter by LPO", all_lpos, key="pay_lpo_filter")
+            cursor.execute("SELECT id, term_description, due_date, amount, status FROM payments WHERE lpo_number = ?", (selected_pay_lpo,))
+            milestones = cursor.fetchall()
 
-    # --- 5. PRINTING / DOCUMENT GENERATION ON LETTERHEAD ---
-    def generate_letterhead(self):
-        return f"""
-================================================================================
-{self.company_name.center(80)}
-{self.company_address.center(80)}
+            if milestones:
+                st.dataframe([{
+                    "ID": m[0], "Milestone": m[1], "Due Date": m[2], "Amount ($)": m[3], "Status": m[4]
+                } for m in milestones], use_container_width=True)
+
+                st.markdown("### Update Status or Edit Milestone")
+                m_id = st.selectbox("Select Milestone ID to Update", [m[0] for m in milestones])
+                
+                cursor.execute("SELECT term_description, due_date, amount, status FROM payments WHERE id = ?", (m_id,))
+                m_data = cursor.fetchone()
+
+                with st.form("edit_payment_form"):
+                    e_desc = st.text_input("Description", value=m_data[0])
+                    e_date = st.text_input("Due Date", value=m_data[1])
+                    e_amt = st.number_input("Amount ($)", value=float(m_data[2]))
+                    e_status = st.selectbox("Payment Status", ["Pending", "Paid"], index=0 if m_data[3]=="Pending" else 1)
+                    
+                    e_sub = st.form_submit_button("Save Payment Update")
+                    if e_sub:
+                        cursor.execute("UPDATE payments SET term_description = ?, due_date = ?, amount = ?, status = ? WHERE id = ?",
+                                       (e_desc, e_date, e_amt, e_status, m_id))
+                        conn.commit()
+                        st.success("Payment record updated successfully!")
+                        st.rerun()
+            else:
+                st.info("No payment terms recorded for this LPO.")
+
+# ==========================================
+# 5. PRINT DOCUMENTS ON LETTERHEAD
+# ==========================================
+elif menu == "🖨️ Print Documents":
+    st.title("🖨️ Generate & Print Documents on Letterhead")
+
+    cursor.execute("SELECT lpo_number FROM lpos")
+    lpo_list = [row[0] for row in cursor.fetchall()]
+
+    if not lpo_list:
+        st.warning("No LPOs available to print documents for.")
+    else:
+        doc_type = st.radio("Select Document Type", ["Delivery Note", "Warranty Certificate"])
+        doc_lpo = st.selectbox("Select LPO Number", lpo_list)
+
+        def make_letterhead():
+            return f"""================================================================================
+{COMPANY_NAME.center(80)}
+{COMPANY_ADDRESS.center(80)}
 ================================================================================
 """
 
-    def print_delivery_note(self, lpo_number, filename=None):
-        self.cursor.execute("SELECT lpo_number, client_name, delivery_schedule FROM lpos WHERE lpo_number = ?", (lpo_number,))
-        lpo = self.cursor.fetchone()
-        if not lpo:
-            print(f"❌ LPO '{lpo_number}' not found.")
-            return
+        if doc_type == "Delivery Note":
+            if st.button("Generate Delivery Note Preview"):
+                cursor.execute("SELECT client_name, delivery_schedule FROM lpos WHERE lpo_number = ?", (doc_lpo,))
+                lpo_info = cursor.fetchone()
+                cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
+                items_info = cursor.fetchall()
 
-        self.cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo_number,))
-        items = self.cursor.fetchall()
+                doc_text = make_letterhead()
+                doc_text += f"\nDELIVERY NOTE\n".center(80)
+                doc_text += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                doc_text += f"LPO Reference: {doc_lpo}\n"
+                doc_text += f"Client Name:   {lpo_info[0]}\n"
+                doc_text += f"Delivery Date: {lpo_info[1]}\n"
+                doc_text += "-" * 80 + "\n"
+                doc_text += f"{'Item Description':<35} | {'Ordered':<8} | {'Delivered':<10} | {'Balance':<8}\n"
+                doc_text += "-" * 80 + "\n"
+                for i in items_info:
+                    doc_text += f"{i[0]:<35} | {i[1]:<8} | {i[2]:<10} | {i[3]:<8}\n"
+                doc_text += "-" * 80 + "\n\n\nReceiver's Signature: ______________________    Company Stamp:\n"
 
-        doc = self.generate_letterhead()
-        doc += f"\nDELIVERY NOTE\n".center(80)
-        doc += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
-        doc += f"LPO Reference: {lpo[0]}\n"
-        doc += f"Client Name:   {lpo[1]}\n"
-        doc += f"Delivery Date: {lpo[2]}\n"
-        doc += "-" * 80 + "\n"
-        doc += f"{'Item Description':<35} | {'Ordered':<8} | {'Delivered':<10} | {'Balance':<8}\n"
-        doc += "-" * 80 + "\n"
+                st.text_area("Printable Text Layout (Copy or Save):", doc_text, height=300)
+                st.download_button("Download Delivery Note (.txt)", doc_text, file_name=f"Delivery_Note_{doc_lpo}.txt")
 
-        for item in items:
-            doc += f"{item[0]:<35} | {item[1]:<8} | {item[2]:<10} | {item[3]:<8}\n"
+        elif doc_type == "Warranty Certificate":
+            warranty_period = st.text_input("Warranty Duration", value="1 Year Standard Warranty")
+            if st.button("Generate Warranty Certificate Preview"):
+                cursor.execute("SELECT client_name FROM lpos WHERE lpo_number = ?", (doc_lpo,))
+                client_name = cursor.fetchone()[0]
+                cursor.execute("SELECT item_name, delivered_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
+                items_info = cursor.fetchall()
 
-        doc += "-" * 80 + "\n\n\n"
-        doc += "Receiver's Signature: ______________________    Company Stamp:\n\n"
-        doc += "Name: ______________________________________    ____________________\n"
+                doc_text = make_letterhead()
+                doc_text += f"\nCERTIFICATE OF WARRANTY\n".center(80)
+                doc_text += f"Issue Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+                doc_text += f"This document certifies that products supplied under LPO: {doc_lpo}\n"
+                doc_text += f"for client {client_name} are covered under warranty.\n\n"
+                doc_text += f"Warranty Duration: {warranty_period}\n"
+                doc_text += "-" * 80 + "\n"
+                doc_text += f"{'Covered Item Description':<50} | {'Quantity Covered':<15}\n"
+                doc_text += "-" * 80 + "\n"
+                for i in items_info:
+                    doc_text += f"{i[0]:<50} | {i[1]:<15}\n"
+                doc_text += "-" * 80 + "\n\nTerms & Conditions:\n1. Covers manufacturing defects under normal usage.\n\n\nAuthorized Signature: ______________________\n"
 
-        file_name = filename or f"Delivery_Note_{lpo_number}.txt"
-        with open(file_name, "w") as f:
-            f.write(doc)
-        print(f"📄 Delivery Note saved to '{file_name}'.")
+                st.text_area("Printable Text Layout (Copy or Save):", doc_text, height=300)
+                st.download_button("Download Warranty Document (.txt)", doc_text, file_name=f"Warranty_{doc_lpo}.txt")
 
-    def print_warranty_document(self, lpo_number, warranty_period="1 Year", filename=None):
-        self.cursor.execute("SELECT lpo_number, client_name FROM lpos WHERE lpo_number = ?", (lpo_number,))
-        lpo = self.cursor.fetchone()
-        if not lpo:
-            print(f"❌ LPO '{lpo_number}' not found.")
-            return
-
-        self.cursor.execute("SELECT item_name, delivered_qty FROM lpo_items WHERE lpo_number = ? AND delivered_qty > 0", (lpo_number,))
-        items = self.cursor.fetchall()
-
-        doc = self.generate_letterhead()
-        doc += f"\nCERTIFICATE OF WARRANTY\n".center(80)
-        doc += f"Issue Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-        doc += f"This document certifies that products supplied under LPO: **{lpo[0]}**\n"
-        doc += f"for client **{lpo[1]}** are covered under warranty.\n\n"
-        doc += f"Warranty Duration: {warranty_period}\n"
-        doc += "-" * 80 + "\n"
-        doc += f"{'Covered Item Description':<50} | {'Quantity Covered':<15}\n"
-        doc += "-" * 80 + "\n"
-
-        for item in items:
-            doc += f"{item[0]:<50} | {item[1]:<15}\n"
-
-        doc += "-" * 80 + "\n\n"
-        doc += "Terms & Conditions:\n"
-        doc += "1. Covers manufacturing defects under normal usage.\n\n\n"
-        doc += "Authorized Signature: ______________________\n"
-        doc += f"For {self.company_name}\n"
-
-        file_name = filename or f"Warranty_Doc_{lpo_number}.txt"
-        with open(file_name, "w") as f:
-            f.write(doc)
-        print(f"📜 Warranty Document saved to '{file_name}'.")
-
-    def close(self):
-        self.conn.close()
-
-
-# --- EXAMPLE WORKFLOW DEMO WITH DASHBOARD ---
-if __name__ == "__main__":
-    oms = OrderManagementSystem()
-
-    # 1. Create a couple of quotations (Some will become LPOs, some will stay pending)
-    oms.create_quotation("QT-2026-101", "Beta Ltd", "Cloud Hosting Subscriptions", 150.00, 10, "Monthly Fixed", "Net 30", "2026-08-30")
-    oms.create_quotation("QT-2026-102", "Gamma Corp", "Cybersecurity Software Licenses", 300.00, 50, "Annual Bulk", "Net 60", "2026-09-15")
-
-    # 2. Turn Quotation 101 into an LPO (leaving 102 as a pending quotation)
-    oms.create_lpo(
-        lpo_number="LPO-7711",
-        quote_ref="QT-2026-101",
-        delivery_schedule="2026-07-10",
-        payment_terms="Net 30",
-        items={"Cloud Hosting Subscriptions": 10}
-    )
-
-    # 3. Partially fulfill LPO-7711
-    oms.record_delivery("LPO-7711", "Cloud Hosting Subscriptions", 4) # Leaves balance of 6 (Still Open/Pending)
-
-    # 4. View the Executive Dashboard
-    oms.show_dashboard()
-
-    oms.close()
+conn.close()
