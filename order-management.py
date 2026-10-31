@@ -175,8 +175,6 @@ if not st.session_state.logged_in:
                 st.rerun()
             else:
                 st.error("Invalid username or password. Please try again.")
-    
-    st.info("💡 **Default Login Credentials:**\n* **Admin:** `admin` / `admin123`\n* **Sales:** `sales` / `sales123`\n* **Finance:** `finance` / `finance123`")
     st.stop()
 
 # ==========================================
