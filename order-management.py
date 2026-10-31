@@ -6,7 +6,7 @@ import os
 import pandas as pd
 import io
 
-# --- DATABASE SETUP ---
+# --- DATABASE SETUP & AUTO-MIGRATION ---
 def get_connection():
     conn = sqlite3.connect("business_tracker.db", check_same_thread=False)
     return conn
@@ -96,6 +96,18 @@ def create_tables():
             FOREIGN KEY (lpo_number) REFERENCES lpos (lpo_number)
         )
     ''')
+
+    # Auto-migration: Ensure currency column exists if updating from older DB version
+    try:
+        cursor.execute("ALTER TABLE quotations ADD COLUMN currency TEXT DEFAULT 'USD'")
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        cursor.execute("ALTER TABLE lpos ADD COLUMN currency TEXT DEFAULT 'USD'")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
