@@ -230,7 +230,6 @@ elif menu == "📝 Manage Quotations":
             st.markdown("---")
             st.markdown("### Item Lines")
             
-            # Use session state or dynamic inputs for multi-items in form
             num_items = st.number_input("How many item lines to add?", min_value=1, max_value=10, value=2)
             
             item_data = []
@@ -244,13 +243,11 @@ elif menu == "📝 Manage Quotations":
             submitted = st.form_submit_button("Save Quotation")
             if submitted:
                 try:
-                    # Save Header
                     cursor.execute('''
                         INSERT INTO quotations (quote_ref, client_name, pricing_terms, payment_terms, validity_date, status)
                         VALUES (?, ?, ?, ?, ?, 'Active')
                     ''', (q_ref, client, pricing_terms, payment_terms, str(validity_date)))
 
-                    # Save Line Items
                     for it_name, it_price, it_qty in item_data:
                         if it_name.strip():
                             cursor.execute('''
@@ -311,7 +308,6 @@ elif menu == "📦 LPO & Deliveries":
                             VALUES (?, ?, ?, ?, ?, 'Open')
                         ''', (lpo_num, selected_quote, client_name, str(delivery_sched), lpo_payment_terms))
 
-                        # Pull all line items from the quotation automatically
                         cursor.execute("SELECT item_details, quantity FROM quotation_items WHERE quote_ref = ?", (selected_quote,))
                         quote_items = cursor.fetchall()
 
@@ -467,23 +463,64 @@ elif menu == "💰 Payment Tracking":
 elif menu == "🖨️ Print Documents":
     st.title("🖨️ Generate & Print Documents on Letterhead")
 
-    cursor.execute("SELECT lpo_number FROM lpos")
-    lpo_list = [row[0] for row in cursor.fetchall()]
+    doc_type = st.radio("Select Document Type", ["Quotation", "Delivery Note", "Warranty Certificate"])
 
-    if not lpo_list:
-        st.warning("No LPOs available to print documents for.")
-    else:
-        doc_type = st.radio("Select Document Type", ["Delivery Note", "Warranty Certificate"])
-        doc_lpo = st.selectbox("Select LPO Number", lpo_list)
-
-        def make_letterhead():
-            return f"""================================================================================
+    def make_letterhead():
+        return f"""================================================================================
 {COMPANY_NAME.center(80)}
 {COMPANY_ADDRESS.center(80)}
 ================================================================================
 """
 
-        if doc_type == "Delivery Note":
+    if doc_type == "Quotation":
+        cursor.execute("SELECT quote_ref FROM quotations")
+        quote_list = [row[0] for row in cursor.fetchall()]
+
+        if not quote_list:
+            st.warning("No quotations available to print.")
+        else:
+            doc_quote = st.selectbox("Select Quotation Reference", quote_list)
+            if st.button("Generate Quotation Preview"):
+                cursor.execute("SELECT client_name, pricing_terms, payment_terms, validity_date FROM quotations WHERE quote_ref = ?", (doc_quote,))
+                q_info = cursor.fetchone()
+                cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (doc_quote,))
+                q_items = cursor.fetchall()
+
+                doc_text = make_letterhead()
+                doc_text += f"\nCOMMERCIAL QUOTATION\n".center(80)
+                doc_text += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
+                doc_text += f"Quotation Ref: {doc_quote}\n"
+                doc_text += f"Client Name:   {q_info[0]}\n"
+                doc_text += f"Valid Until:   {q_info[3]}\n"
+                doc_text += f"Pricing Terms: {q_info[1]}\n"
+                doc_text += f"Payment Terms: {q_info[2]}\n"
+                doc_text += "-" * 80 + "\n"
+                doc_text += f"{'Item Description':<30} | {'Qty':<6} | {'Unit Price ($)':<15} | {'Total ($)':<15}\n"
+                doc_text += "-" * 80 + "\n"
+                
+                grand_total = 0.0
+                for item in q_items:
+                    line_total = item[1] * item[2]
+                    grand_total += line_total
+                    doc_text += f"{item[0]:<30} | {item[2]:<6} | ${item[1]:<14,.2f} | ${line_total:<14,.2f}\n"
+
+                doc_text += "-" * 80 + "\n"
+                doc_text += f"{'GRAND TOTAL:':<55} ${grand_total:,.2f}\n"
+                doc_text += "-" * 80 + "\n\n\n"
+                doc_text += f"Authorized Signature: ______________________\n"
+                doc_text += f"For {COMPANY_NAME}\n"
+
+                st.text_area("Printable Text Layout (Copy or Save):", doc_text, height=350)
+                st.download_button("Download Quotation (.txt)", doc_text, file_name=f"Quotation_{doc_quote}.txt")
+
+    elif doc_type == "Delivery Note":
+        cursor.execute("SELECT lpo_number FROM lpos")
+        lpo_list = [row[0] for row in cursor.fetchall()]
+
+        if not lpo_list:
+            st.warning("No LPOs available to print delivery notes for.")
+        else:
+            doc_lpo = st.selectbox("Select LPO Number", lpo_list)
             if st.button("Generate Delivery Note Preview"):
                 cursor.execute("SELECT client_name, delivery_schedule FROM lpos WHERE lpo_number = ?", (doc_lpo,))
                 lpo_info = cursor.fetchone()
@@ -506,7 +543,14 @@ elif menu == "🖨️ Print Documents":
                 st.text_area("Printable Text Layout (Copy or Save):", doc_text, height=300)
                 st.download_button("Download Delivery Note (.txt)", doc_text, file_name=f"Delivery_Note_{doc_lpo}.txt")
 
-        elif doc_type == "Warranty Certificate":
+    elif doc_type == "Warranty Certificate":
+        cursor.execute("SELECT lpo_number FROM lpos")
+        lpo_list = [row[0] for row in cursor.fetchall()]
+
+        if not lpo_list:
+            st.warning("No LPOs available to print warranty documents for.")
+        else:
+            doc_lpo = st.selectbox("Select LPO Number", lpo_list, key="warranty_lpo_sel")
             warranty_period = st.text_input("Warranty Duration", value="1 Year Standard Warranty")
             if st.button("Generate Warranty Certificate Preview"):
                 cursor.execute("SELECT client_name FROM lpos WHERE lpo_number = ?", (doc_lpo,))
