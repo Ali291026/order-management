@@ -15,11 +15,31 @@ def create_tables():
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Users Table for Access Control
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT
+        )
+    ''')
+
+    # Seed default users if table is empty
+    cursor.execute("SELECT COUNT(*) FROM users")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO users (username, password, role) VALUES ('admin', 'admin123', 'Admin')")
+        cursor.execute("INSERT INTO users (username, password, role) VALUES ('sales', 'sales123', 'Sales')")
+        cursor.execute("INSERT INTO users (username, password, role) VALUES ('finance', 'finance123', 'Finance')")
+        conn.commit()
+
+    # Quotations Header Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS quotations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             quote_ref TEXT UNIQUE,
             client_name TEXT,
+            currency TEXT DEFAULT 'USD',
             pricing_terms TEXT,
             payment_terms TEXT,
             validity_date TEXT,
@@ -38,12 +58,14 @@ def create_tables():
         )
     ''')
 
+    # LPOs Header Table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lpos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lpo_number TEXT UNIQUE,
             quote_ref TEXT,
             client_name TEXT,
+            currency TEXT DEFAULT 'USD',
             delivery_schedule TEXT,
             payment_terms TEXT,
             status TEXT DEFAULT 'Open',
@@ -120,25 +142,74 @@ st.markdown("""
 COMPANY_NAME = "MY COMPANY NAME LLC"
 COMPANY_ADDRESS = "123 Business Ave, Suite 100 | Phone: +1 234 567 8900 | Email: info@mycompany.com"
 LOGO_FILE = "logo.png"
+CURRENCIES = ["USD ($)", "EUR (€)", "GBP (£)", "AED (د.إ)", "SGD ($)", "CAD ($)", "AUD ($)"]
 
-# Sidebar Branding with Automatic Logo Check
+# --- SESSION STATE FOR AUTHENTICATION ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+
+# --- LOGIN SCREEN ---
+if not st.session_state.logged_in:
+    st.title("🔐 Enterprise Login Portal")
+    st.markdown("Please log in with your credentials to access the system.")
+    
+    with st.form("login_form"):
+        username_input = st.text_input("Username")
+        password_input = st.text_input("Password", type="password")
+        login_submit = st.form_submit_button("Login")
+        
+        if login_submit:
+            conn = get_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT role FROM users WHERE username = ? AND password = ?", (username_input.strip(), password_input.strip()))
+            user_record = cursor.fetchone()
+            conn.close()
+            
+            if user_record:
+                st.session_state.logged_in = True
+                st.session_state.username = username_input
+                st.session_state.role = user_record[0]
+                st.success(f"Welcome back, {username_input} ({user_record[0]})!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password. Please try again.")
+    
+    st.info("💡 **Default Login Credentials:**\n* **Admin:** `admin` / `admin123`\n* **Sales:** `sales` / `sales123`\n* **Finance:** `finance` / `finance123`")
+    st.stop()
+
+# ==========================================
+# AUTHENTICATED APP LAYOUT
+# ==========================================
 st.sidebar.title("💼 Management Suite")
 if os.path.exists(LOGO_FILE):
     st.sidebar.image(LOGO_FILE, use_container_width=True)
-else:
-    st.sidebar.info("💡 Place your 'logo.png' in this folder to display it here.")
 
-st.sidebar.markdown(f"**Entity:** `{COMPANY_NAME}`")
+st.sidebar.markdown(f"**User:** `{st.session_state.username}`")
+st.sidebar.markdown(f"**Role:** `{st.session_state.role}`")
+
+if st.sidebar.button("🚪 Logout"):
+    st.session_state.logged_in = False
+    st.session_state.username = ""
+    st.session_state.role = ""
+    st.rerun()
+
 st.sidebar.markdown("---")
 
-menu = st.sidebar.radio("Navigation Menu", [
-    "📊 Executive Dashboard", 
-    "📝 Manage Quotations", 
-    "📦 LPO & Deliveries", 
-    "💰 Payment Tracking", 
-    "📈 Reports & Analytics",
-    "🖨️ Print Documents"
-])
+# Role-Based Navigation Options
+menu_options = ["📊 Executive Dashboard"]
+
+if st.session_state.role in ["Admin", "Sales"]:
+    menu_options.extend(["📝 Manage Quotations", "📦 LPO & Deliveries", "🖨️ Print Documents"])
+
+if st.session_state.role in ["Admin", "Finance"]:
+    menu_options.extend(["💰 Payment Tracking", "📈 Reports & Analytics"])
+
+if st.session_state.role == "Admin":
+    menu_options.append("👥 User Management")
+
+menu = st.sidebar.radio("Navigation Menu", menu_options)
 
 conn = get_connection()
 cursor = conn.cursor()
@@ -199,13 +270,13 @@ if menu == "📊 Executive Dashboard":
 
     with dash_tab1:
         st.subheader("Active LPOs & Item Fulfillment Status")
-        cursor.execute("SELECT lpo_number, client_name, delivery_schedule, payment_terms FROM lpos WHERE status = 'Open'")
+        cursor.execute("SELECT lpo_number, client_name, currency, delivery_schedule, payment_terms FROM lpos WHERE status = 'Open'")
         open_lpos = cursor.fetchall()
         
         if open_lpos:
             for lpo in open_lpos:
-                with st.expander(f"📋 LPO Reference: {lpo[0]}  |  Client: {lpo[1]}  |  Due: {lpo[2]}", expanded=True):
-                    st.markdown(f"**Payment Terms:** `{lpo[3]}`")
+                with st.expander(f"📋 LPO: {lpo[0]} | Client: {lpo[1]} | Currency: {lpo[2]} | Due: {lpo[3]}", expanded=True):
+                    st.markdown(f"**Payment Terms:** `{lpo[4]}`")
                     
                     cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (lpo[0],))
                     items = cursor.fetchall()
@@ -222,39 +293,44 @@ if menu == "📊 Executive Dashboard":
                         st.progress(progress)
                     st.markdown("---")
         else:
-            st.info("No open LPOs found right now. All deliveries are up to date!")
+            st.info("No open LPOs found right now.")
 
     with dash_tab2:
         st.subheader("Quotations Awaiting LPO Confirmation")
-        cursor.execute("SELECT quote_ref, client_name, validity_date FROM quotations WHERE status = 'Active'")
+        cursor.execute("SELECT quote_ref, client_name, currency, validity_date FROM quotations WHERE status = 'Active'")
         pending_quotes = cursor.fetchall()
         if pending_quotes:
             for q in pending_quotes:
-                with st.expander(f"Quote Ref: {q[0]} | Client: {q[1]} | Valid Until: {q[2]}"):
+                with st.expander(f"Quote Ref: {q[0]} | Client: {q[1]} | Currency: {q[2]} | Valid Until: {q[3]}"):
                     cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (q[0],))
                     q_items = cursor.fetchall()
-                    st.dataframe([{"Item Description": i[0], "Unit Price ($)": f"${i[1]:,.2f}", "Quantity": i[2], "Line Total ($)": f"${i[1]*i[2]:,.2f}"} for i in q_items], use_container_width=True)
+                    st.dataframe([{
+                        "Item Description": i[0], 
+                        f"Unit Price ({q[2]})": f"{i[1]:,.2f}", 
+                        "Quantity": i[2], 
+                        f"Line Total ({q[2]})": f"{i[1]*i[2]:,.2f}"
+                    } for i in q_items], use_container_width=True)
         else:
             st.success("No pending quotations awaiting confirmation.")
 
     with dash_tab3:
         st.subheader("Successfully Fulfilled LPOs")
-        cursor.execute("SELECT lpo_number, client_name, delivery_schedule FROM lpos WHERE status = 'Fulfilled'")
+        cursor.execute("SELECT lpo_number, client_name, currency, delivery_schedule FROM lpos WHERE status = 'Fulfilled'")
         fulfilled_lpos = cursor.fetchall()
         if fulfilled_lpos:
             st.dataframe(
-                [{"LPO Number": f[0], "Client Name": f[1], "Delivery Schedule": f[2]} for f in fulfilled_lpos],
+                [{"LPO Number": f[0], "Client Name": f[1], "Currency": f[2], "Delivery Schedule": f[3]} for f in fulfilled_lpos],
                 use_container_width=True
             )
         else:
             st.info("No completed LPOs recorded yet.")
 
 # ==========================================
-# 2. MANAGE QUOTATIONS (Multi-Item)
+# 2. MANAGE QUOTATIONS
 # ==========================================
 elif menu == "📝 Manage Quotations":
     st.title("📝 Quotation Management Suite")
-    st.markdown("Create, view, and maintain quotations with multiple line items and strict duplication prevention.")
+    st.markdown("Create and manage multi-currency quotations with multiple line items.")
     
     tab1, tab2 = st.tabs(["Create Quotation", "View / Edit Quotations"])
 
@@ -265,6 +341,7 @@ elif menu == "📝 Manage Quotations":
             with col1:
                 q_ref = st.text_input("Quotation Reference (e.g., QT-2026-001)")
                 client = st.text_input("Client Name")
+                currency = st.selectbox("Select Currency", CURRENCIES)
             with col2:
                 pricing_terms = st.text_input("Pricing Terms", value="Fixed pricing")
                 payment_terms = st.text_input("Payment Terms", value="Net 30")
@@ -279,7 +356,7 @@ elif menu == "📝 Manage Quotations":
             for i in range(int(num_items)):
                 cols = st.columns([3, 1, 1])
                 it_name = cols[0].text_input(f"Item #{i+1} Description", key=f"item_{i}")
-                it_price = cols[1].number_input(f"Unit Price #{i+1} ($)", min_value=0.0, step=10.0, key=f"price_{i}")
+                it_price = cols[1].number_input(f"Unit Price #{i+1}", min_value=0.0, step=10.0, key=f"price_{i}")
                 it_qty = cols[2].number_input(f"Qty #{i+1}", min_value=1, value=1, key=f"qty_{i}")
                 item_data.append((it_name, it_price, it_qty))
 
@@ -290,9 +367,9 @@ elif menu == "📝 Manage Quotations":
                 else:
                     try:
                         cursor.execute('''
-                            INSERT INTO quotations (quote_ref, client_name, pricing_terms, payment_terms, validity_date, status)
-                            VALUES (?, ?, ?, ?, ?, 'Active')
-                        ''', (q_ref, client, pricing_terms, payment_terms, str(validity_date)))
+                            INSERT INTO quotations (quote_ref, client_name, currency, pricing_terms, payment_terms, validity_date, status)
+                            VALUES (?, ?, ?, ?, ?, ?, 'Active')
+                        ''', (q_ref, client, currency, pricing_terms, payment_terms, str(validity_date)))
 
                         for it_name, it_price, it_qty in item_data:
                             if it_name.strip():
@@ -302,22 +379,27 @@ elif menu == "📝 Manage Quotations":
                                 ''', (q_ref, it_name, it_price, it_qty))
 
                         conn.commit()
-                        st.success(f"Quotation '{q_ref}' successfully saved with all line items!")
+                        st.success(f"Quotation '{q_ref}' successfully saved in {currency}!")
                     except sqlite3.IntegrityError:
                         st.error(f"Error: Quotation reference '{q_ref}' already exists. Duplication prevented!")
 
     with tab2:
         st.subheader("Existing Quotations Database")
-        cursor.execute("SELECT quote_ref, client_name, pricing_terms, payment_terms, validity_date, status FROM quotations")
+        cursor.execute("SELECT quote_ref, client_name, currency, pricing_terms, payment_terms, validity_date, status FROM quotations")
         all_quotes = cursor.fetchall()
         
         if all_quotes:
             for q in all_quotes:
-                with st.expander(f"Ref: {q[0]} | Client: {q[1]} | Status: {q[5]}"):
-                    st.write(f"**Pricing Terms:** {q[2]} | **Payment Terms:** {q[3]} | **Valid Until:** {q[4]}")
+                with st.expander(f"Ref: {q[0]} | Client: {q[1]} | Currency: {q[2]} | Status: {q[6]}"):
+                    st.write(f"**Pricing Terms:** {q[3]} | **Payment Terms:** {q[4]} | **Valid Until:** {q[5]}")
                     cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (q[0],))
                     items = cursor.fetchall()
-                    st.dataframe([{"Item": i[0], "Unit Price ($)": f"${i[1]:,.2f}", "Qty": i[2], "Total ($)": f"${i[1]*i[2]:,.2f}"} for i in items], use_container_width=True)
+                    st.dataframe([{
+                        "Item": i[0], 
+                        f"Unit Price ({q[2]})": f"{i[1]:,.2f}", 
+                        "Qty": i[2], 
+                        f"Total ({q[2]})": f"{i[1]*i[2]:,.2f}"
+                    } for i in items], use_container_width=True)
         else:
             st.info("No quotations found.")
 
@@ -326,14 +408,15 @@ elif menu == "📝 Manage Quotations":
 # ==========================================
 elif menu == "📦 LPO & Deliveries":
     st.title("📦 LPO Tracking, Schedules & Deliveries")
-    st.markdown("Convert confirmed quotations into LPOs, track delivery schedules, and record running item balances.")
+    st.markdown("Convert quotations into LPOs, track delivery schedules, and record running item balances.")
 
     tab1, tab2, tab3 = st.tabs(["Create LPO", "Record Delivery", "Edit LPO Quantities"])
 
     with tab1:
         st.subheader("Convert Active Quotation to LPO")
-        cursor.execute("SELECT quote_ref FROM quotations WHERE status = 'Active'")
-        active_quotes = [row[0] for row in cursor.fetchall()]
+        cursor.execute("SELECT quote_ref, currency FROM quotations WHERE status = 'Active'")
+        active_quotes_data = cursor.fetchall()
+        active_quotes = [row[0] for row in active_quotes_data]
 
         if not active_quotes:
             st.warning("No active quotations available to convert.")
@@ -347,13 +430,15 @@ elif menu == "📦 LPO & Deliveries":
                 lpo_submit = st.form_submit_button("Generate LPO From Quotation")
                 if lpo_submit:
                     try:
-                        cursor.execute("SELECT client_name FROM quotations WHERE quote_ref = ?", (selected_quote,))
-                        client_name = cursor.fetchone()[0]
+                        cursor.execute("SELECT client_name, currency FROM quotations WHERE quote_ref = ?", (selected_quote,))
+                        q_info = cursor.fetchone()
+                        client_name = q_info[0]
+                        q_currency = q_info[1]
 
                         cursor.execute('''
-                            INSERT INTO lpos (lpo_number, quote_ref, client_name, delivery_schedule, payment_terms, status)
-                            VALUES (?, ?, ?, ?, ?, 'Open')
-                        ''', (lpo_num, selected_quote, client_name, str(delivery_sched), lpo_payment_terms))
+                            INSERT INTO lpos (lpo_number, quote_ref, client_name, currency, delivery_schedule, payment_terms, status)
+                            VALUES (?, ?, ?, ?, ?, ?, 'Open')
+                        ''', (lpo_num, selected_quote, client_name, q_currency, str(delivery_sched), lpo_payment_terms))
 
                         cursor.execute("SELECT item_details, quantity FROM quotation_items WHERE quote_ref = ?", (selected_quote,))
                         quote_items = cursor.fetchall()
@@ -366,7 +451,7 @@ elif menu == "📦 LPO & Deliveries":
 
                         cursor.execute("UPDATE quotations SET status = 'Confirmed' WHERE quote_ref = ?", (selected_quote,))
                         conn.commit()
-                        st.success(f"LPO '{lpo_num}' successfully generated!")
+                        st.success(f"LPO '{lpo_num}' successfully generated in {q_currency}!")
                     except sqlite3.IntegrityError:
                         st.error(f"Error: LPO Number '{lpo_num}' already exists.")
 
@@ -448,8 +533,9 @@ elif menu == "💰 Payment Tracking":
 
     tab1, tab2 = st.tabs(["Add Payment Milestone", "Track & Update Payments"])
 
-    cursor.execute("SELECT lpo_number FROM lpos")
-    all_lpos = [row[0] for row in cursor.fetchall()]
+    cursor.execute("SELECT lpo_number, currency FROM lpos")
+    lpo_records = cursor.fetchall()
+    all_lpos = [row[0] for row in lpo_records]
 
     with tab1:
         st.subheader("Add Payment Milestone")
@@ -458,9 +544,13 @@ elif menu == "💰 Payment Tracking":
         else:
             with st.form("payment_schedule_form"):
                 pay_lpo = st.selectbox("Select LPO Number", all_lpos)
+                
+                cursor.execute("SELECT currency FROM lpos WHERE lpo_number = ?", (pay_lpo,))
+                lpo_curr = cursor.fetchone()[0]
+                
                 term_desc = st.text_input("Term Description (e.g., 50% Advance, Net 30)")
                 due_date = st.date_input("Due Date")
-                amount = st.number_input("Amount ($)", min_value=0.0, step=100.0)
+                amount = st.number_input(f"Amount ({lpo_curr})", min_value=0.0, step=100.0)
                 
                 pay_sub = st.form_submit_button("Add Milestone")
                 if pay_sub:
@@ -475,12 +565,17 @@ elif menu == "💰 Payment Tracking":
         st.subheader("Manage Payment Status")
         if all_lpos:
             selected_pay_lpo = st.selectbox("Filter by LPO", all_lpos, key="pay_lpo_filter")
+            
+            cursor.execute("SELECT currency FROM lpos WHERE lpo_number = ?", (selected_pay_lpo,))
+            curr_row = cursor.fetchone()
+            curr_symbol = curr_row[0] if curr_row else "USD"
+
             cursor.execute("SELECT id, term_description, due_date, amount, status FROM payments WHERE lpo_number = ?", (selected_pay_lpo,))
             milestones = cursor.fetchall()
 
             if milestones:
                 st.dataframe([{
-                    "ID": m[0], "Milestone": m[1], "Due Date": m[2], "Amount ($)": f"${m[3]:,.2f}", "Status": m[4]
+                    "ID": m[0], "Milestone": m[1], "Due Date": m[2], f"Amount ({curr_symbol})": f"{m[3]:,.2f}", "Status": m[4]
                 } for m in milestones], use_container_width=True)
 
                 st.markdown("### Update Milestone Record")
@@ -492,7 +587,7 @@ elif menu == "💰 Payment Tracking":
                 with st.form("edit_payment_form"):
                     e_desc = st.text_input("Description", value=m_data[0])
                     e_date = st.text_input("Due Date", value=m_data[1])
-                    e_amt = st.number_input("Amount ($)", value=float(m_data[2]))
+                    e_amt = st.number_input(f"Amount ({curr_symbol})", value=float(m_data[2]))
                     e_status = st.selectbox("Payment Status", ["Pending", "Paid"], index=0 if m_data[3]=="Pending" else 1)
                     
                     e_sub = st.form_submit_button("Save Payment Update")
@@ -506,7 +601,7 @@ elif menu == "💰 Payment Tracking":
                 st.info("No payment terms recorded for this LPO.")
 
 # ==========================================
-# 5. REPORTS & ANALYTICS (Filtered Export)
+# 5. REPORTS & ANALYTICS
 # ==========================================
 elif menu == "📈 Reports & Analytics":
     st.title("📈 Advanced Reporting & Filtered Exports")
@@ -519,7 +614,6 @@ elif menu == "📈 Reports & Analytics":
 
     col1, col2 = st.columns(2)
     
-    # Fetch client list for filtering
     cursor.execute("SELECT DISTINCT client_name FROM quotations UNION SELECT DISTINCT client_name FROM lpos")
     clients = [row[0] for row in cursor.fetchall() if row[0]]
     client_filter = col1.selectbox("Filter by Client Name", ["All Clients"] + clients)
@@ -527,7 +621,7 @@ elif menu == "📈 Reports & Analytics":
     if report_type == "Quotations Report":
         status_filter = col2.selectbox("Filter by Status", ["All", "Active", "Confirmed", "Cancelled"])
         
-        query = "SELECT quote_ref, client_name, pricing_terms, payment_terms, validity_date, status FROM quotations WHERE 1=1"
+        query = "SELECT quote_ref, client_name, currency, pricing_terms, payment_terms, validity_date, status FROM quotations WHERE 1=1"
         params = []
         if client_filter != "All Clients":
             query += " AND client_name = ?"
@@ -538,12 +632,12 @@ elif menu == "📈 Reports & Analytics":
             
         cursor.execute(query, params)
         data = cursor.fetchall()
-        df = pd.DataFrame(data, columns=["Quote Ref", "Client Name", "Pricing Terms", "Payment Terms", "Validity Date", "Status"])
+        df = pd.DataFrame(data, columns=["Quote Ref", "Client Name", "Currency", "Pricing Terms", "Payment Terms", "Validity Date", "Status"])
 
     elif report_type == "LPO Status Report":
         status_filter = col2.selectbox("Filter by LPO Status", ["All", "Open", "Fulfilled"])
         
-        query = "SELECT lpo_number, quote_ref, client_name, delivery_schedule, payment_terms, status FROM lpos WHERE 1=1"
+        query = "SELECT lpo_number, quote_ref, client_name, currency, delivery_schedule, payment_terms, status FROM lpos WHERE 1=1"
         params = []
         if client_filter != "All Clients":
             query += " AND client_name = ?"
@@ -554,13 +648,13 @@ elif menu == "📈 Reports & Analytics":
             
         cursor.execute(query, params)
         data = cursor.fetchall()
-        df = pd.DataFrame(data, columns=["LPO Number", "Quote Ref", "Client Name", "Delivery Schedule", "Payment Terms", "Status"])
+        df = pd.DataFrame(data, columns=["LPO Number", "Quote Ref", "Client Name", "Currency", "Delivery Schedule", "Payment Terms", "Status"])
 
-    else: # Payments Report
+    else:
         status_filter = col2.selectbox("Filter by Payment Status", ["All", "Pending", "Paid"])
         
         query = '''
-            SELECT p.id, p.lpo_number, l.client_name, p.term_description, p.due_date, p.amount, p.status 
+            SELECT p.id, p.lpo_number, l.client_name, l.currency, p.term_description, p.due_date, p.amount, p.status 
             FROM payments p JOIN lpos l ON p.lpo_number = l.lpo_number WHERE 1=1
         '''
         params = []
@@ -573,7 +667,7 @@ elif menu == "📈 Reports & Analytics":
             
         cursor.execute(query, params)
         data = cursor.fetchall()
-        df = pd.DataFrame(data, columns=["ID", "LPO Number", "Client Name", "Term Description", "Due Date", "Amount ($)", "Status"])
+        df = pd.DataFrame(data, columns=["ID", "LPO Number", "Client Name", "Currency", "Term Description", "Due Date", "Amount", "Status"])
 
     st.markdown(f"**Filtered Results:** `{len(df)}` records found.")
     st.dataframe(df, use_container_width=True)
@@ -583,7 +677,6 @@ elif menu == "📈 Reports & Analytics":
 
     col_ex1, col_ex2 = st.columns(2)
 
-    # Excel Export
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Report')
@@ -596,7 +689,6 @@ elif menu == "📈 Reports & Analytics":
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # PDF Summary Report Export
     class PDFReportSummary(FPDF):
         def header(self):
             if os.path.exists(LOGO_FILE):
@@ -627,7 +719,6 @@ elif menu == "📈 Reports & Analytics":
         pdf.cell(0, 6, f"Generated On: {datetime.now().strftime('%Y-%m-%d')} | Filter: {client_filter}", 0, 1)
         pdf.ln(5)
 
-        # Print table columns
         cols = df.columns.tolist()
         col_width = 190 / len(cols)
         
@@ -648,7 +739,40 @@ elif menu == "📈 Reports & Analytics":
         st.download_button("Download PDF Report", pdf_bytes, file_name=f"{report_type.replace(' ', '_')}.pdf", mime="application/pdf")
 
 # ==========================================
-# 6. PRINT DOCUMENTS ON LETTERHEAD
+# 6. USER MANAGEMENT (Admin Only)
+# ==========================================
+elif menu == "👥 User Management" and st.session_state.role == "Admin":
+    st.title("👥 User Account Management")
+    st.markdown("Create new user accounts and assign roles (`Admin`, `Sales`, `Finance`).")
+
+    tab1, tab2 = st.tabs(["Create User", "View Users"])
+
+    with tab1:
+        with st.form("create_user_form"):
+            new_user = st.text_input("New Username")
+            new_pass = st.text_input("Password", type="password")
+            new_role = st.selectbox("Assign Role", ["Admin", "Sales", "Finance"])
+            
+            user_sub = st.form_submit_button("Create User Account")
+            if user_sub:
+                if not new_user.strip() or not new_pass.strip():
+                    st.error("Please provide both username and password.")
+                else:
+                    try:
+                        cursor.execute("INSERT INTO users (username, password, role) VALUES (?, ?, ?)", (new_user.strip(), new_pass.strip(), new_role))
+                        conn.commit()
+                        st.success(f"User '{new_user}' created successfully with role '{new_role}'!")
+                    except sqlite3.IntegrityError:
+                        st.error(f"Error: Username '{new_user}' already exists.")
+
+    with tab2:
+        st.subheader("Registered System Users")
+        cursor.execute("SELECT id, username, role FROM users")
+        users_list = cursor.fetchall()
+        st.dataframe([{"ID": u[0], "Username": u[1], "Role": u[2]} for u in users_list], use_container_width=True)
+
+# ==========================================
+# 7. PRINT DOCUMENTS ON LETTERHEAD
 # ==========================================
 elif menu == "🖨️ Print Documents":
     st.title("🖨️ Document Generation & Letterhead Printing")
@@ -687,8 +811,11 @@ elif menu == "🖨️ Print Documents":
         else:
             doc_quote = st.selectbox("Select Quotation Reference", quote_list)
             if st.button("Generate Quotation PDF"):
-                cursor.execute("SELECT client_name, pricing_terms, payment_terms, validity_date FROM quotations WHERE quote_ref = ?", (doc_quote,))
+                cursor.execute("SELECT client_name, currency, pricing_terms, payment_terms, validity_date FROM quotations WHERE quote_ref = ?", (doc_quote,))
                 q_info = cursor.fetchone()
+                q_client = q_info[0]
+                q_currency = q_info[1]
+                
                 cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (doc_quote,))
                 q_items = cursor.fetchall()
 
@@ -698,17 +825,18 @@ elif menu == "🖨️ Print Documents":
                 pdf.cell(0, 10, "COMMERCIAL QUOTATION", 0, 1, "C")
                 pdf.set_font("Arial", "", 10)
                 pdf.cell(0, 6, f"Quotation Reference: {doc_quote}", 0, 1)
-                pdf.cell(0, 6, f"Client Name: {q_info[0]}", 0, 1)
-                pdf.cell(0, 6, f"Valid Until: {q_info[3]}", 0, 1)
-                pdf.cell(0, 6, f"Pricing Terms: {q_info[1]} | Payment Terms: {q_info[2]}", 0, 1)
+                pdf.cell(0, 6, f"Client Name: {q_client}", 0, 1)
+                pdf.cell(0, 6, f"Currency: {q_currency}", 0, 1)
+                pdf.cell(0, 6, f"Valid Until: {q_info[4]}", 0, 1)
+                pdf.cell(0, 6, f"Pricing Terms: {q_info[2]} | Payment Terms: {q_info[3]}", 0, 1)
                 pdf.ln(5)
 
                 pdf.set_fill_color(240, 240, 240)
                 pdf.set_font("Arial", "B", 10)
                 pdf.cell(90, 8, "Item Description", 1, 0, "L", True)
                 pdf.cell(20, 8, "Qty", 1, 0, "C", True)
-                pdf.cell(40, 8, "Unit Price", 1, 0, "R", True)
-                pdf.cell(40, 8, "Total", 1, 1, "R", True)
+                pdf.cell(40, 8, f"Unit Price ({q_currency.split()[0]})", 1, 0, "R", True)
+                pdf.cell(40, 8, f"Total ({q_currency.split()[0]})", 1, 1, "R", True)
 
                 pdf.set_font("Arial", "", 10)
                 grand_total = 0.0
@@ -717,12 +845,12 @@ elif menu == "🖨️ Print Documents":
                     grand_total += line_total
                     pdf.cell(90, 8, str(item[0]), 1, 0, "L")
                     pdf.cell(20, 8, str(item[2]), 1, 0, "C")
-                    pdf.cell(40, 8, f"${item[1]:,.2f}", 1, 0, "R")
-                    pdf.cell(40, 8, f"${line_total:,.2f}", 1, 1, "R")
+                    pdf.cell(40, 8, f"{item[1]:,.2f}", 1, 0, "R")
+                    pdf.cell(40, 8, f"{line_total:,.2f}", 1, 1, "R")
 
                 pdf.set_font("Arial", "B", 10)
-                pdf.cell(150, 8, "Grand Total:", 1, 0, "R")
-                pdf.cell(40, 8, f"${grand_total:,.2f}", 1, 1, "R")
+                pdf.cell(150, 8, f"Grand Total ({q_currency.split()[0]}):", 1, 0, "R")
+                pdf.cell(40, 8, f"{grand_total:,.2f}", 1, 1, "R")
                 pdf.ln(15)
 
                 pdf.set_font("Arial", "", 10)
@@ -741,7 +869,7 @@ elif menu == "🖨️ Print Documents":
         else:
             doc_lpo = st.selectbox("Select LPO Number", lpo_list)
             if st.button("Generate Delivery Note PDF"):
-                cursor.execute("SELECT client_name, delivery_schedule FROM lpos WHERE lpo_number = ?", (doc_lpo,))
+                cursor.execute("SELECT client_name, currency, delivery_schedule FROM lpos WHERE lpo_number = ?", (doc_lpo,))
                 lpo_info = cursor.fetchone()
                 cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
                 items_info = cursor.fetchall()
@@ -753,7 +881,8 @@ elif menu == "🖨️ Print Documents":
                 pdf.set_font("Arial", "", 10)
                 pdf.cell(0, 6, f"LPO Reference: {doc_lpo}", 0, 1)
                 pdf.cell(0, 6, f"Client Name: {lpo_info[0]}", 0, 1)
-                pdf.cell(0, 6, f"Delivery Date: {lpo_info[1]}", 0, 1)
+                pdf.cell(0, 6, f"Currency: {lpo_info[1]}", 0, 1)
+                pdf.cell(0, 6, f"Delivery Date: {lpo_info[2]}", 0, 1)
                 pdf.ln(5)
 
                 pdf.set_fill_color(240, 240, 240)
@@ -787,8 +916,11 @@ elif menu == "🖨️ Print Documents":
             doc_lpo = st.selectbox("Select LPO Number", lpo_list, key="warranty_lpo_sel")
             warranty_period = st.text_input("Warranty Duration", value="1 Year Standard Warranty")
             if st.button("Generate Warranty Certificate PDF"):
-                cursor.execute("SELECT client_name FROM lpos WHERE lpo_number = ?", (doc_lpo,))
-                client_name = cursor.fetchone()[0]
+                cursor.execute("SELECT client_name, currency FROM lpos WHERE lpo_number = ?", (doc_lpo,))
+                lpo_data = cursor.fetchone()
+                client_name = lpo_data[0]
+                lpo_curr = lpo_data[1]
+                
                 cursor.execute("SELECT item_name, delivered_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
                 items_info = cursor.fetchall()
 
@@ -798,7 +930,7 @@ elif menu == "🖨️ Print Documents":
                 pdf.cell(0, 10, "CERTIFICATE OF WARRANTY", 0, 1, "C")
                 pdf.set_font("Arial", "", 10)
                 pdf.cell(0, 6, f"LPO Reference: {doc_lpo} | Client: {client_name}", 0, 1)
-                pdf.cell(0, 6, f"Warranty Period: {warranty_period}", 0, 1)
+                pdf.cell(0, 6, f"Currency: {lpo_curr} | Warranty Period: {warranty_period}", 0, 1)
                 pdf.ln(5)
 
                 pdf.set_fill_color(240, 240, 240)
