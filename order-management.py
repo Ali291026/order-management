@@ -1,6 +1,10 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
+from fpdf import FPDF
+import os
+import pandas as pd
+import io
 
 # --- DATABASE SETUP ---
 def get_connection():
@@ -82,12 +86,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# Custom Enterprise UI Theme Styling
 st.markdown("""
     <style>
-        .main {
-            background-color: #f8f9fa;
-        }
+        .main { background-color: #f8f9fa; }
         .metric-container {
             background-color: #ffffff;
             border: 1px solid #e2e8f0;
@@ -96,10 +97,7 @@ st.markdown("""
             box-shadow: 0 1px 3px rgba(0,0,0,0.05);
             margin-bottom: 10px;
         }
-        .stTabs [data-baseweb="tab-list"] { 
-            gap: 12px; 
-            background-color: transparent;
-        }
+        .stTabs [data-baseweb="tab-list"] { gap: 12px; background-color: transparent; }
         .stTabs [data-baseweb="tab"] {
             height: 45px;
             padding-left: 20px;
@@ -115,16 +113,21 @@ st.markdown("""
             color: white !important;
             border-color: #2563eb !important;
         }
-        h1, h2, h3 {
-            color: #1e293b;
-        }
+        h1, h2, h3 { color: #1e293b; }
     </style>
 """, unsafe_allow_html=True)
 
 COMPANY_NAME = "MY COMPANY NAME LLC"
 COMPANY_ADDRESS = "123 Business Ave, Suite 100 | Phone: +1 234 567 8900 | Email: info@mycompany.com"
+LOGO_FILE = "logo.png"
 
+# Sidebar Branding with Automatic Logo Check
 st.sidebar.title("💼 Management Suite")
+if os.path.exists(LOGO_FILE):
+    st.sidebar.image(LOGO_FILE, use_container_width=True)
+else:
+    st.sidebar.info("💡 Place your 'logo.png' in this folder to display it here.")
+
 st.sidebar.markdown(f"**Entity:** `{COMPANY_NAME}`")
 st.sidebar.markdown("---")
 
@@ -133,6 +136,7 @@ menu = st.sidebar.radio("Navigation Menu", [
     "📝 Manage Quotations", 
     "📦 LPO & Deliveries", 
     "💰 Payment Tracking", 
+    "📈 Reports & Analytics",
     "🖨️ Print Documents"
 ])
 
@@ -502,7 +506,149 @@ elif menu == "💰 Payment Tracking":
                 st.info("No payment terms recorded for this LPO.")
 
 # ==========================================
-# 5. PRINT DOCUMENTS ON LETTERHEAD
+# 5. REPORTS & ANALYTICS (Filtered Export)
+# ==========================================
+elif menu == "📈 Reports & Analytics":
+    st.title("📈 Advanced Reporting & Filtered Exports")
+    st.markdown("Filter records by module, status, or client name, and export data directly to **Excel (.xlsx)** or **PDF**.")
+
+    report_type = st.selectbox("Select Report Category", ["Quotations Report", "LPO Status Report", "Payments & Billing Report"])
+
+    st.markdown("---")
+    st.subheader("🔍 Filter Options")
+
+    col1, col2 = st.columns(2)
+    
+    # Fetch client list for filtering
+    cursor.execute("SELECT DISTINCT client_name FROM quotations UNION SELECT DISTINCT client_name FROM lpos")
+    clients = [row[0] for row in cursor.fetchall() if row[0]]
+    client_filter = col1.selectbox("Filter by Client Name", ["All Clients"] + clients)
+
+    if report_type == "Quotations Report":
+        status_filter = col2.selectbox("Filter by Status", ["All", "Active", "Confirmed", "Cancelled"])
+        
+        query = "SELECT quote_ref, client_name, pricing_terms, payment_terms, validity_date, status FROM quotations WHERE 1=1"
+        params = []
+        if client_filter != "All Clients":
+            query += " AND client_name = ?"
+            params.append(client_filter)
+        if status_filter != "All":
+            query += " AND status = ?"
+            params.append(status_filter)
+            
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        df = pd.DataFrame(data, columns=["Quote Ref", "Client Name", "Pricing Terms", "Payment Terms", "Validity Date", "Status"])
+
+    elif report_type == "LPO Status Report":
+        status_filter = col2.selectbox("Filter by LPO Status", ["All", "Open", "Fulfilled"])
+        
+        query = "SELECT lpo_number, quote_ref, client_name, delivery_schedule, payment_terms, status FROM lpos WHERE 1=1"
+        params = []
+        if client_filter != "All Clients":
+            query += " AND client_name = ?"
+            params.append(client_filter)
+        if status_filter != "All":
+            query += " AND status = ?"
+            params.append(status_filter)
+            
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        df = pd.DataFrame(data, columns=["LPO Number", "Quote Ref", "Client Name", "Delivery Schedule", "Payment Terms", "Status"])
+
+    else: # Payments Report
+        status_filter = col2.selectbox("Filter by Payment Status", ["All", "Pending", "Paid"])
+        
+        query = '''
+            SELECT p.id, p.lpo_number, l.client_name, p.term_description, p.due_date, p.amount, p.status 
+            FROM payments p JOIN lpos l ON p.lpo_number = l.lpo_number WHERE 1=1
+        '''
+        params = []
+        if client_filter != "All Clients":
+            query += " AND l.client_name = ?"
+            params.append(client_filter)
+        if status_filter != "All":
+            query += " AND p.status = ?"
+            params.append(status_filter)
+            
+        cursor.execute(query, params)
+        data = cursor.fetchall()
+        df = pd.DataFrame(data, columns=["ID", "LPO Number", "Client Name", "Term Description", "Due Date", "Amount ($)", "Status"])
+
+    st.markdown(f"**Filtered Results:** `{len(df)}` records found.")
+    st.dataframe(df, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("📥 Export Filtered Data")
+
+    col_ex1, col_ex2 = st.columns(2)
+
+    # Excel Export
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Report')
+    excel_data = output.getvalue()
+
+    col_ex1.download_button(
+        label="📊 Download Excel Report (.xlsx)",
+        data=excel_data,
+        file_name=f"{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+    # PDF Summary Report Export
+    class PDFReportSummary(FPDF):
+        def header(self):
+            if os.path.exists(LOGO_FILE):
+                try:
+                    self.image(LOGO_FILE, 10, 8, 25)
+                except Exception:
+                    pass
+            self.set_font("Arial", "B", 13)
+            self.cell(0, 6, COMPANY_NAME, 0, 1, "R")
+            self.set_font("Arial", "", 8)
+            self.cell(0, 4, COMPANY_ADDRESS, 0, 1, "R")
+            self.ln(5)
+            self.set_draw_color(200, 200, 200)
+            self.line(10, 25, 200, 25)
+            self.ln(10)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Arial", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
+
+    if col_ex2.button("📑 Generate Summary Report PDF"):
+        pdf = PDFReportSummary()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 10, report_type.upper(), 0, 1, "C")
+        pdf.set_font("Arial", "", 10)
+        pdf.cell(0, 6, f"Generated On: {datetime.now().strftime('%Y-%m-%d')} | Filter: {client_filter}", 0, 1)
+        pdf.ln(5)
+
+        # Print table columns
+        cols = df.columns.tolist()
+        col_width = 190 / len(cols)
+        
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_font("Arial", "B", 9)
+        for col in cols:
+            pdf.cell(col_width, 8, str(col)[:15], 1, 0, "C", True)
+        pdf.ln()
+
+        pdf.set_font("Arial", "", 8)
+        for row in data:
+            for val in row:
+                pdf.cell(col_width, 7, str(val)[:18], 1, 0, "C")
+            pdf.ln()
+
+        pdf_bytes = pdf.output(dest="S").encode("latin1")
+        st.success("PDF Report generated successfully!")
+        st.download_button("Download PDF Report", pdf_bytes, file_name=f"{report_type.replace(' ', '_')}.pdf", mime="application/pdf")
+
+# ==========================================
+# 6. PRINT DOCUMENTS ON LETTERHEAD
 # ==========================================
 elif menu == "🖨️ Print Documents":
     st.title("🖨️ Document Generation & Letterhead Printing")
@@ -510,13 +656,27 @@ elif menu == "🖨️ Print Documents":
 
     doc_type = st.radio("Select Document Type", ["Quotation", "Delivery Note", "Warranty Certificate"], horizontal=True)
 
-    def make_letterhead():
-        return (
-            "================================================================================\n"
-            f"{COMPANY_NAME.center(80)}\n"
-            f"{COMPANY_ADDRESS.center(80)}\n"
-            "================================================================================\n"
-        )
+    class PDFReport(FPDF):
+        def header(self):
+            if os.path.exists(LOGO_FILE):
+                try:
+                    self.image(LOGO_FILE, 10, 8, 25)
+                except Exception:
+                    pass
+            
+            self.set_font("Arial", "B", 13)
+            self.cell(0, 6, COMPANY_NAME, 0, 1, "R")
+            self.set_font("Arial", "", 8)
+            self.cell(0, 4, COMPANY_ADDRESS, 0, 1, "R")
+            self.ln(5)
+            self.set_draw_color(200, 200, 200)
+            self.line(10, 25, 200, 25)
+            self.ln(10)
+
+        def footer(self):
+            self.set_y(-15)
+            self.set_font("Arial", "I", 8)
+            self.cell(0, 10, f"Page {self.page_no()}", 0, 0, "C")
 
     if doc_type == "Quotation":
         cursor.execute("SELECT quote_ref FROM quotations")
@@ -526,38 +686,51 @@ elif menu == "🖨️ Print Documents":
             st.warning("No quotations available to print.")
         else:
             doc_quote = st.selectbox("Select Quotation Reference", quote_list)
-            if st.button("Generate Quotation Template"):
+            if st.button("Generate Quotation PDF"):
                 cursor.execute("SELECT client_name, pricing_terms, payment_terms, validity_date FROM quotations WHERE quote_ref = ?", (doc_quote,))
                 q_info = cursor.fetchone()
                 cursor.execute("SELECT item_details, unit_price, quantity FROM quotation_items WHERE quote_ref = ?", (doc_quote,))
                 q_items = cursor.fetchall()
 
-                doc_text = make_letterhead()
-                doc_text += "\nCOMMERCIAL QUOTATION\n".center(80)
-                doc_text += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
-                doc_text += f"Quotation Ref: {doc_quote}\n"
-                doc_text += f"Client Name:   {q_info[0]}\n"
-                doc_text += f"Valid Until:   {q_info[3]}\n"
-                doc_text += f"Pricing Terms: {q_info[1]}\n"
-                doc_text += f"Payment Terms: {q_info[2]}\n"
-                doc_text += "-" * 80 + "\n"
-                doc_text += f"{'Item Description':<30} | {'Qty':<6} | {'Unit Price ($)':<15} | {'Total ($)':<15}\n"
-                doc_text += "-" * 80 + "\n"
-                
+                pdf = PDFReport()
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 14)
+                pdf.cell(0, 10, "COMMERCIAL QUOTATION", 0, 1, "C")
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 6, f"Quotation Reference: {doc_quote}", 0, 1)
+                pdf.cell(0, 6, f"Client Name: {q_info[0]}", 0, 1)
+                pdf.cell(0, 6, f"Valid Until: {q_info[3]}", 0, 1)
+                pdf.cell(0, 6, f"Pricing Terms: {q_info[1]} | Payment Terms: {q_info[2]}", 0, 1)
+                pdf.ln(5)
+
+                pdf.set_fill_color(240, 240, 240)
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(90, 8, "Item Description", 1, 0, "L", True)
+                pdf.cell(20, 8, "Qty", 1, 0, "C", True)
+                pdf.cell(40, 8, "Unit Price", 1, 0, "R", True)
+                pdf.cell(40, 8, "Total", 1, 1, "R", True)
+
+                pdf.set_font("Arial", "", 10)
                 grand_total = 0.0
                 for item in q_items:
                     line_total = item[1] * item[2]
                     grand_total += line_total
-                    doc_text += f"{item[0]:<30} | {item[2]:<6} | ${item[1]:<14,.2f} | ${line_total:<14,.2f}\n"
+                    pdf.cell(90, 8, str(item[0]), 1, 0, "L")
+                    pdf.cell(20, 8, str(item[2]), 1, 0, "C")
+                    pdf.cell(40, 8, f"${item[1]:,.2f}", 1, 0, "R")
+                    pdf.cell(40, 8, f"${line_total:,.2f}", 1, 1, "R")
 
-                doc_text += "-" * 80 + "\n"
-                doc_text += f"{'GRAND TOTAL:':<55} ${grand_total:,.2f}\n"
-                doc_text += "-" * 80 + "\n\n\n"
-                doc_text += "Authorized Signature: ______________________\n"
-                doc_text += f"For {COMPANY_NAME}\n"
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(150, 8, "Grand Total:", 1, 0, "R")
+                pdf.cell(40, 8, f"${grand_total:,.2f}", 1, 1, "R")
+                pdf.ln(15)
 
-                st.text_area("Printable Layout Preview:", doc_text, height=350)
-                st.download_button("Download Quotation Document (.txt)", doc_text, file_name=f"Quotation_{doc_quote}.txt")
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 6, "Authorized Signature: ______________________", 0, 1)
+
+                pdf_bytes = pdf.output(dest="S").encode("latin1")
+                st.success("Quotation PDF generated successfully!")
+                st.download_button("Download Quotation PDF", pdf_bytes, file_name=f"Quotation_{doc_quote}.pdf", mime="application/pdf")
 
     elif doc_type == "Delivery Note":
         cursor.execute("SELECT lpo_number FROM lpos")
@@ -567,27 +740,42 @@ elif menu == "🖨️ Print Documents":
             st.warning("No LPOs available to print delivery notes for.")
         else:
             doc_lpo = st.selectbox("Select LPO Number", lpo_list)
-            if st.button("Generate Delivery Note Template"):
+            if st.button("Generate Delivery Note PDF"):
                 cursor.execute("SELECT client_name, delivery_schedule FROM lpos WHERE lpo_number = ?", (doc_lpo,))
                 lpo_info = cursor.fetchone()
                 cursor.execute("SELECT item_name, ordered_qty, delivered_qty, balance_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
                 items_info = cursor.fetchall()
 
-                doc_text = make_letterhead()
-                doc_text += "\nDELIVERY NOTE\n".center(80)
-                doc_text += f"Date: {datetime.now().strftime('%Y-%m-%d')}\n"
-                doc_text += f"LPO Reference: {doc_lpo}\n"
-                doc_text += f"Client Name:   {lpo_info[0]}\n"
-                doc_text += f"Delivery Date: {lpo_info[1]}\n"
-                doc_text += "-" * 80 + "\n"
-                doc_text += f"{'Item Description':<35} | {'Ordered':<8} | {'Delivered':<10} | {'Balance':<8}\n"
-                doc_text += "-" * 80 + "\n"
-                for i in items_info:
-                    doc_text += f"{i[0]:<35} | {i[1]:<8} | {i[2]:<10} | {i[3]:<8}\n"
-                doc_text += "-" * 80 + "\n\n\nReceiver's Signature: ______________________    Company Stamp:\n"
+                pdf = PDFReport()
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 14)
+                pdf.cell(0, 10, "DELIVERY NOTE", 0, 1, "C")
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 6, f"LPO Reference: {doc_lpo}", 0, 1)
+                pdf.cell(0, 6, f"Client Name: {lpo_info[0]}", 0, 1)
+                pdf.cell(0, 6, f"Delivery Date: {lpo_info[1]}", 0, 1)
+                pdf.ln(5)
 
-                st.text_area("Printable Layout Preview:", doc_text, height=300)
-                st.download_button("Download Delivery Note (.txt)", doc_text, file_name=f"Delivery_Note_{doc_lpo}.txt")
+                pdf.set_fill_color(240, 240, 240)
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(90, 8, "Item Description", 1, 0, "L", True)
+                pdf.cell(30, 8, "Ordered", 1, 0, "C", True)
+                pdf.cell(35, 8, "Delivered", 1, 0, "C", True)
+                pdf.cell(35, 8, "Balance", 1, 1, "C", True)
+
+                pdf.set_font("Arial", "", 10)
+                for i in items_info:
+                    pdf.cell(90, 8, str(i[0]), 1, 0, "L")
+                    pdf.cell(30, 8, str(i[1]), 1, 0, "C")
+                    pdf.cell(35, 8, str(i[2]), 1, 0, "C")
+                    pdf.cell(35, 8, str(i[3]), 1, 1, "C")
+
+                pdf.ln(15)
+                pdf.cell(0, 6, "Receiver's Signature: ______________________    Company Stamp: ______________", 0, 1)
+
+                pdf_bytes = pdf.output(dest="S").encode("latin1")
+                st.success("Delivery Note PDF generated successfully!")
+                st.download_button("Download Delivery Note PDF", pdf_bytes, file_name=f"Delivery_Note_{doc_lpo}.pdf", mime="application/pdf")
 
     elif doc_type == "Warranty Certificate":
         cursor.execute("SELECT lpo_number FROM lpos")
@@ -598,26 +786,41 @@ elif menu == "🖨️ Print Documents":
         else:
             doc_lpo = st.selectbox("Select LPO Number", lpo_list, key="warranty_lpo_sel")
             warranty_period = st.text_input("Warranty Duration", value="1 Year Standard Warranty")
-            if st.button("Generate Warranty Certificate Template"):
+            if st.button("Generate Warranty Certificate PDF"):
                 cursor.execute("SELECT client_name FROM lpos WHERE lpo_number = ?", (doc_lpo,))
                 client_name = cursor.fetchone()[0]
                 cursor.execute("SELECT item_name, delivered_qty FROM lpo_items WHERE lpo_number = ?", (doc_lpo,))
                 items_info = cursor.fetchall()
 
-                doc_text = make_letterhead()
-                doc_text += "\nCERTIFICATE OF WARRANTY\n".center(80)
-                doc_text += f"Issue Date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-                doc_text += f"This document certifies that products supplied under LPO: {doc_lpo}\n"
-                doc_text += f"for client {client_name} are covered under warranty.\n\n"
-                doc_text += f"Warranty Duration: {warranty_period}\n"
-                doc_text += "-" * 80 + "\n"
-                doc_text += f"{'Covered Item Description':<50} | {'Quantity Covered':<15}\n"
-                doc_text += "-" * 80 + "\n"
-                for i in items_info:
-                    doc_text += f"{i[0]:<50} | {i[1]:<15}\n"
-                doc_text += "-" * 80 + "\n\nTerms & Conditions:\n1. Covers manufacturing defects under normal usage.\n\n\nAuthorized Signature: ______________________\n"
+                pdf = PDFReport()
+                pdf.add_page()
+                pdf.set_font("Arial", "B", 14)
+                pdf.cell(0, 10, "CERTIFICATE OF WARRANTY", 0, 1, "C")
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 6, f"LPO Reference: {doc_lpo} | Client: {client_name}", 0, 1)
+                pdf.cell(0, 6, f"Warranty Period: {warranty_period}", 0, 1)
+                pdf.ln(5)
 
-                st.text_area("Printable Layout Preview:", doc_text, height=300)
-                st.download_button("Download Warranty Document (.txt)", doc_text, file_name=f"Warranty_{doc_lpo}.txt")
+                pdf.set_fill_color(240, 240, 240)
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(130, 8, "Covered Item Description", 1, 0, "L", True)
+                pdf.cell(60, 8, "Quantity Covered", 1, 1, "C", True)
+
+                pdf.set_font("Arial", "", 10)
+                for i in items_info:
+                    pdf.cell(130, 8, str(i[0]), 1, 0, "L")
+                    pdf.cell(60, 8, str(i[1]), 1, 1, "C")
+
+                pdf.ln(10)
+                pdf.set_font("Arial", "I", 9)
+                pdf.multi_cell(0, 5, "Terms & Conditions:\n1. This warranty covers manufacturing defects under normal usage conditions.\n2. Physical damage or unauthorized repairs void this certificate.")
+                pdf.ln(10)
+
+                pdf.set_font("Arial", "", 10)
+                pdf.cell(0, 6, "Authorized Signature: ______________________", 0, 1)
+
+                pdf_bytes = pdf.output(dest="S").encode("latin1")
+                st.success("Warranty Certificate PDF generated successfully!")
+                st.download_button("Download Warranty PDF", pdf_bytes, file_name=f"Warranty_{doc_lpo}.pdf", mime="application/pdf")
 
 conn.close()
