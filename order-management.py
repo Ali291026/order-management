@@ -34,7 +34,6 @@ st.markdown(
 # Initialize Session State for Products, BOMs, and Raw Materials
 @st.cache_data
 def load_initial_data():
-    # Raw Materials & Global Rates/Stock
     raw_materials = [
         {
             "Item": "Calcium Stearate",
@@ -178,17 +177,13 @@ def load_initial_data():
         },
     ]
 
-    # Finished Products & Planned Production Units (e.g., batches or pieces for 1M, 2M, 3M)
-    # Proportions representing your initial baseline dataset split across products
     products = [
         {"Product": "Standard PVC Pipe (Class 1)", "Target_1M_Units": 1000, "Target_2M_Units": 2000, "Target_3M_Units": 3000},
         {"Product": "Heavy Duty Conduit (Class 2)", "Target_1M_Units": 500, "Target_2M_Units": 1000, "Target_3M_Units": 1500},
     ]
 
-    # Bill of Materials (BOM): kg required per 1 unit of Product
-    # Derived proportionally from your original aggregate numbers
     bom_data = [
-        # Product A: Standard PVC Pipe
+        # Product A
         {"Product": "Standard PVC Pipe (Class 1)", "Item": "Calcium Stearate", "Kg_Per_Unit": 0.20},
         {"Product": "Standard PVC Pipe (Class 1)", "Item": "Calcium Carbonate", "Kg_Per_Unit": 25.00},
         {"Product": "Standard PVC Pipe (Class 1)", "Item": "OB-1", "Kg_Per_Unit": 0.002},
@@ -204,7 +199,7 @@ def load_initial_data():
         {"Product": "Standard PVC Pipe (Class 1)", "Item": "PVC SGT", "Kg_Per_Unit": 21.40},
         {"Product": "Standard PVC Pipe (Class 1)", "Item": "PVC Nbi", "Kg_Per_Unit": 27.45},
 
-        # Product B: Heavy Duty Conduit
+        # Product B
         {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Calcium Stearate", "Kg_Per_Unit": 0.22},
         {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Calcium Carbonate", "Kg_Per_Unit": 26.90},
         {"Product": "Heavy Duty Conduit (Class 2)", "Item": "OB-1", "Kg_Per_Unit": 0.0022},
@@ -240,7 +235,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sub-header">Define finished product targets, manage product Bill of Materials (BOM), analyze raw material requirements, and track procurement orders.</p>',
+    '<p class="sub-header">Select products via dropdown, manage BOM formulations, configure production targets, and track procurement.</p>',
     unsafe_allow_html=True,
 )
 
@@ -256,36 +251,27 @@ production_scale = st.sidebar.slider(
 scale_multiplier = production_scale / 100.0
 
 # Calculate total required raw materials based on Product Targets and BOMs
-# Scaled Targets per Product
 prod_df["Scaled_1M_Units"] = prod_df["Target_1M_Units"] * scale_multiplier
 prod_df["Scaled_2M_Units"] = prod_df["Target_2M_Units"] * scale_multiplier
 prod_df["Scaled_3M_Units"] = prod_df["Target_3M_Units"] * scale_multiplier
 
-# Merge BOM with Scaled Production Targets to calculate total raw material demand
 merged_demand = pd.merge(bom_df, prod_df, on="Product", how="inner")
 merged_demand["Req_1M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_1M_Units"]
 merged_demand["Req_2M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_2M_Units"]
 merged_demand["Req_3M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_3M_Units"]
 
-# Aggregate raw material demand across all products
 agg_demand = merged_demand.groupby("Item")[["Req_1M_kg", "Req_2M_kg", "Req_3M_kg"]].sum().reset_index()
-
-# Merge back with raw materials master table
 df = pd.merge(rm_df, agg_demand, on="Item", how="left").fillna(0)
 
-# Compute financial and procurement metrics
 df["One_Month_kg"] = df["Req_1M_kg"]
 df["Two_Months_kg"] = df["Req_2M_kg"]
 df["Three_Months_kg"] = df["Req_3M_kg"]
 
-# Use Physical Count if available, otherwise System Stock
 df["Effective_Stock"] = df.apply(
     lambda r: r["Stock_System"] if r["Stock_Physical"] == 0.0 and r["Stock_System"] > 0 else r["Stock_Physical"],
     axis=1,
 )
 df["Total_Available_kg"] = df["Effective_Stock"] + df["In_Transit"]
-
-# To Order = 2-Month Requirement minus Total Available (minimum 0)
 df["To_Order_kg"] = (df["Two_Months_kg"] - df["Total_Available_kg"]).apply(lambda x: max(0.0, x))
 df["Total_Cost_KES"] = df["Two_Months_kg"] * df["Unit_Rate_KES"]
 df["PO_Cost_KES"] = df["To_Order_kg"] * df["Unit_Rate_KES"]
@@ -358,7 +344,7 @@ with tab1:
 
 with tab2:
     st.subheader("📑 Supplier Purchase Order Generation")
-    po_type = st.radio("Select Vendor Purchase Category:", ["All Vendors", "Local", "Import"], horizontal=True)
+    po_type = st.radio("Select Vendor Purchase Category:", ["All Vendors", "Local", "Import"], horizontal=True, key="po_radio")
     po_df = df[df["Source"] == po_type] if po_type in ["Local", "Import"] else df
 
     po_display = po_df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES", "PO_Cost_KES"]].copy()
@@ -427,7 +413,7 @@ with tab4:
 
 with tab5:
     st.subheader("🎯 Finished Product Production Targets")
-    st.markdown("Configure planned production volume (units/batches) for each finished product across 1, 2, and 3-month cycles.")
+    st.markdown("Configure planned production volume (units/batches) for each finished product across cycles.")
     
     edited_products = st.data_editor(
         st.session_state["products_df"],
@@ -440,32 +426,52 @@ with tab5:
         st.rerun()
 
 with tab6:
-    st.subheader("✏️ Edit Bill of Materials (BOM) & Raw Material Master")
-    st.markdown("Modify raw material consumption per unit of finished product, stock counts, and procurement rates.")
+    st.subheader("✏️ Product Dropdown Formulation & BOM Manager")
+    st.markdown("Select a product from the dropdown to view and edit its Bill of Materials (kg required per unit), or add new products.")
+
+    # Product Selector / Creator Controls
+    existing_products = st.session_state["products_df"]["Product"].tolist()
     
-    col_e1, col_e2 = st.columns(2)
-    with col_e1:
-        st.markdown("#### **Raw Material Master & Rates**")
-        edited_rm = st.data_editor(
-            st.session_state["raw_materials_df"],
+    col_sel1, col_sel2 = st.columns([2, 1])
+    with col_sel1:
+        selected_product = st.selectbox("Select Finished Product to Edit BOM:", existing_products)
+    with col_sel2:
+        new_prod_name = st.text_input("Or Add New Product Name:")
+        if st.button("➕ Create Product"):
+            if new_prod_name and new_prod_name not in existing_products:
+                # Add to products table with default 0 targets
+                new_row = pd.DataFrame([{"Product": new_prod_name, "Target_1M_Units": 100, "Target_2M_Units": 200, "Target_3M_Units": 300}])
+                st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
+                
+                # Add initial default BOM rows for all raw materials with 0 kg
+                init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in rm_df["Item"]])
+                st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
+                st.success(f"Successfully created product: {new_prod_name}!")
+                st.rerun()
+            elif new_prod_name in existing_products:
+                st.error("Product already exists!")
+
+    st.markdown("---")
+    
+    if selected_product:
+        st.markdown(f"#### Bill of Materials for: **{selected_product}**")
+        
+        # Filter BOM for selected product
+        product_bom = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] == selected_product].copy()
+        
+        edited_product_bom = st.data_editor(
+            product_bom[["Item", "Kg_Per_Unit"]],
             num_rows="dynamic",
             use_container_width=True,
-            key="rm_editor",
+            key=f"bom_editor_{selected_product}",
         )
-        if not edited_rm.equals(st.session_state["raw_materials_df"]):
-            st.session_state["raw_materials_df"] = edited_rm
-            st.rerun()
-            
-    with col_e2:
-        st.markdown("#### **Bill of Materials (BOM - kg per unit)**")
-        edited_bom = st.data_editor(
-            st.session_state["bom_df"],
-            num_rows="dynamic",
-            use_container_width=True,
-            key="bom_editor",
-        )
-        if not edited_bom.equals(st.session_state["bom_df"]):
-            st.session_state["bom_df"] = edited_bom
+        
+        # Save updates back to session state BOM dataframe
+        if not edited_product_bom.equals(product_bom[["Item", "Kg_Per_Unit"]]):
+            # Reconstruct full bom_df keeping other products untouched
+            edited_product_bom["Product"] = selected_product
+            other_boms = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] != selected_product]
+            st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
             st.rerun()
 
 # --- Consolidated Excel Export Module ---
