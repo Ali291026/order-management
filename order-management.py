@@ -235,11 +235,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sub-header">Manage simulation volume, products, and navigation from the left sidebar.</p>',
+    '<p class="sub-header">Manage simulation volume, products, raw materials, and navigation from the left sidebar.</p>',
     unsafe_allow_html=True,
 )
 
-# --- SIDEBAR CONTROLS, NAVIGATION & PRODUCT MANAGER ---
+# --- SIDEBAR CONTROLS, NAVIGATION & MANAGERS ---
 st.sidebar.header("🎛️ Global Simulation Controls")
 production_scale = st.sidebar.slider(
     "Production Volume Scale (%)",
@@ -261,6 +261,7 @@ selected_page = st.sidebar.radio(
         "📈 Cost Variance (Nov '25 vs June '26)",
         "🎯 Finished Product Targets",
         "✏️ Edit Selected Product BOM",
+        "🧪 Raw Material Master Manager",
     ],
 )
 
@@ -277,12 +278,49 @@ with st.sidebar.expander("➕ Add New Finished Product"):
             new_row = pd.DataFrame([{"Product": new_prod_name, "Target_1M_Units": 100, "Target_2M_Units": 200, "Target_3M_Units": 300}])
             st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
             
-            init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in rm_df["Item"]])
+            # Add initial default BOM rows for all current raw materials with 0 kg
+            current_rms = st.session_state["raw_materials_df"]["Item"].tolist()
+            init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in current_rms])
             st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
-            st.success(f"Created: {new_prod_name}")
+            st.success(f"Created Product: {new_prod_name}")
             st.rerun()
         elif new_prod_name in existing_products:
             st.error("Product already exists!")
+
+with st.sidebar.expander("➕ Add New Raw Material"):
+    new_rm_name = st.text_input("Raw Material Name:")
+    new_rm_source = st.selectbox("Vendor Source:", ["Local", "Import"], key="new_rm_src")
+    new_rm_rate = st.number_input("Unit Rate (KES):", min_value=0.0, value=100.0, step=10.0)
+    
+    if st.button("Create Raw Material"):
+        current_rms = st.session_state["raw_materials_df"]["Item"].tolist()
+        if new_rm_name and new_rm_name not in current_rms:
+            # 1. Add to Raw Materials Master DataFrame
+            new_rm_row = pd.DataFrame([{
+                "Item": new_rm_name,
+                "Stock_System": 0.0,
+                "Stock_Physical": 0.0,
+                "In_Transit": 0.0,
+                "Unit_Rate_KES": new_rm_rate,
+                "Nov_2025_Rate": new_rm_rate * 0.95,
+                "June_2026_Rate": new_rm_rate,
+                "Source": new_rm_source,
+            }])
+            st.session_state["raw_materials_df"] = pd.concat([st.session_state["raw_materials_df"], new_rm_row], ignore_index=True)
+            
+            # 2. Automatically inject into BOM for ALL existing products with 0.0 kg default
+            all_products = st.session_state["products_df"]["Product"].tolist()
+            new_bom_rows = pd.DataFrame([{
+                "Product": prod,
+                "Item": new_rm_name,
+                "Kg_Per_Unit": 0.0
+            } for prod in all_products])
+            st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], new_bom_rows], ignore_index=True)
+            
+            st.success(f"Added Raw Material: {new_rm_name}")
+            st.rerun()
+        elif new_rm_name in current_rms:
+            st.error("Raw material already exists! Duplicate creation prevented.")
 
 # Calculate total required raw materials based on Product Targets and BOMs
 prod_df["Scaled_1M_Units"] = prod_df["Target_1M_Units"] * scale_multiplier
@@ -301,7 +339,6 @@ df["One_Month_kg"] = df["Req_1M_kg"]
 df["Two_Months_kg"] = df["Req_2M_kg"]
 df["Three_Months_kg"] = df["Req_3M_kg"]
 
-# Calculate Percentage Share per Item across cycles
 total_1m_sum = df["One_Month_kg"].sum()
 total_2m_sum = df["Two_Months_kg"].sum()
 total_3m_sum = df["Three_Months_kg"].sum()
@@ -497,6 +534,20 @@ elif selected_page == "✏️ Edit Selected Product BOM":
         st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
         st.rerun()
 
+elif selected_page == "🧪 Raw Material Master Table":
+    st.subheader("🧪 Raw Material Master Table & Rates")
+    st.markdown("Edit raw material unit rates, sources, and system stock levels directly below.")
+    
+    edited_rm = st.data_editor(
+        st.session_state["raw_materials_df"],
+        num_rows="dynamic",
+        use_container_width=True,
+        key="rm_master_editor",
+    )
+    if not edited_rm.equals(st.session_state["raw_materials_df"]):
+        st.session_state["raw_materials_df"] = edited_rm
+        st.rerun()
+
 # --- Consolidated Excel Export Module ---
 st.markdown("---")
 st.subheader("📥 Export Consolidated Workbook")
@@ -506,6 +557,7 @@ def generate_consolidated_excel():
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         prod_df.to_excel(writer, sheet_name="Product_Targets", index=False)
         bom_df.to_excel(writer, sheet_name="Bill_Of_Materials", index=False)
+        rm_df.to_excel(writer, sheet_name="Raw_Materials_Master", index=False)
         df[["Item", "Source", "One_Month_kg", "One_Month_Pct", "Two_Months_kg", "Two_Months_Pct", "Three_Months_kg", "Three_Months_Pct", "Unit_Rate_KES", "Total_Cost_KES"]].round(2).to_excel(writer, sheet_name="Dashboard_Summary", index=False)
         df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES"]].assign(
             Total_PO_Cost=lambda r: r["To_Order_kg"] * r["Unit_Rate_KES"]
