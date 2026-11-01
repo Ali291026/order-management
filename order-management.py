@@ -235,7 +235,11 @@ def load_data():
     return pd.DataFrame(data)
 
 
-df = load_data()
+# Initialize Session State for dynamic editing
+if "df" not in st.session_state:
+    st.session_state["df"] = load_data()
+
+df = st.session_state["df"]
 
 # App Header
 st.markdown(
@@ -270,12 +274,13 @@ df["Scaled_To_Order_kg"] = (df["To_Order_kg"] * scale_multiplier).apply(
 df["Total_Cost_KES"] = df["Scaled_2M_kg"] * df["Unit_Rate_KES"]
 df["PO_Cost_KES"] = df["Scaled_To_Order_kg"] * df["Unit_Rate_KES"]
 
-# Tabs Setup
-tab1, tab2, tab3, tab4 = st.tabs([
+# Tabs Setup (Added Edit Formulations Tab)
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Dashboard & Trend Projection",
     "📑 Supplier Purchase Orders",
     "📦 Warehouse & Low-Stock Alerts",
     "📈 Cost Variance (Nov '25 vs June '26)",
+    "✏️ Edit Formulations",
 ])
 
 with tab1:
@@ -550,6 +555,30 @@ with tab4:
         use_container_width=True,
         hide_index=True,
     )
+
+with tab5:
+    st.subheader("✏️ Interactive Formulation & Rate Editor")
+    st.markdown(
+        "Modify baseline quantities, rates, stock levels, or add/remove rows"
+        " below. Changes instantly update all metrics, charts, and exports across"
+        " the app."
+    )
+
+    edited_df = st.data_editor(
+        st.session_state["df"],
+        num_rows="dynamic",
+        use_container_width=True,
+        key="formulation_table_editor",
+    )
+
+    # Update session state with edited dataframe
+    if not edited_df.equals(st.session_state["df"]):
+        st.session_state["df"] = edited_df
+        st.rerun()
+
+    if st.button("🔄 Reset to Default Formulations"):
+        st.session_state["df"] = load_data()
+        st.rerun()
 
 # --- Consolidated Excel Export Module ---
 st.markdown("---")
