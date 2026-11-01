@@ -235,11 +235,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sub-header">Select products via dropdown, manage BOM formulations, configure production targets, and track procurement.</p>',
+    '<p class="sub-header">Manage simulation volume, products, and navigation from the left sidebar.</p>',
     unsafe_allow_html=True,
 )
 
-# Sidebar Simulation Controls
+# --- SIDEBAR CONTROLS, NAVIGATION & PRODUCT MANAGER ---
 st.sidebar.header("🎛️ Global Simulation Controls")
 production_scale = st.sidebar.slider(
     "Production Volume Scale (%)",
@@ -249,6 +249,40 @@ production_scale = st.sidebar.slider(
     step=5,
 )
 scale_multiplier = production_scale / 100.0
+
+st.sidebar.markdown("---")
+st.sidebar.header("📌 Navigation Menu")
+selected_page = st.sidebar.radio(
+    "Go to:",
+    [
+        "📊 Dashboard & Trend Projection",
+        "📑 Supplier Purchase Orders",
+        "📦 Warehouse & Low-Stock Alerts",
+        "📈 Cost Variance (Nov '25 vs June '26)",
+        "🎯 Finished Product Targets",
+        "✏️ Edit Selected Product BOM",
+    ],
+)
+
+st.sidebar.markdown("---")
+st.sidebar.header("📦 Product & BOM Manager")
+
+existing_products = st.session_state["products_df"]["Product"].tolist()
+selected_product = st.sidebar.selectbox("Select Product to Edit BOM:", existing_products)
+
+with st.sidebar.expander("➕ Add New Finished Product"):
+    new_prod_name = st.text_input("New Product Name:")
+    if st.button("Create Product"):
+        if new_prod_name and new_prod_name not in existing_products:
+            new_row = pd.DataFrame([{"Product": new_prod_name, "Target_1M_Units": 100, "Target_2M_Units": 200, "Target_3M_Units": 300}])
+            st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
+            
+            init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in rm_df["Item"]])
+            st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
+            st.success(f"Created: {new_prod_name}")
+            st.rerun()
+        elif new_prod_name in existing_products:
+            st.error("Product already exists!")
 
 # Calculate total required raw materials based on Product Targets and BOMs
 prod_df["Scaled_1M_Units"] = prod_df["Target_1M_Units"] * scale_multiplier
@@ -267,6 +301,15 @@ df["One_Month_kg"] = df["Req_1M_kg"]
 df["Two_Months_kg"] = df["Req_2M_kg"]
 df["Three_Months_kg"] = df["Req_3M_kg"]
 
+# Calculate Percentage Share per Item across cycles
+total_1m_sum = df["One_Month_kg"].sum()
+total_2m_sum = df["Two_Months_kg"].sum()
+total_3m_sum = df["Three_Months_kg"].sum()
+
+df["One_Month_Pct"] = (df["One_Month_kg"] / total_1m_sum * 100) if total_1m_sum > 0 else 0
+df["Two_Months_Pct"] = (df["Two_Months_kg"] / total_2m_sum * 100) if total_2m_sum > 0 else 0
+df["Three_Months_Pct"] = (df["Three_Months_kg"] / total_3m_sum * 100) if total_3m_sum > 0 else 0
+
 df["Effective_Stock"] = df.apply(
     lambda r: r["Stock_System"] if r["Stock_Physical"] == 0.0 and r["Stock_System"] > 0 else r["Stock_Physical"],
     axis=1,
@@ -276,17 +319,8 @@ df["To_Order_kg"] = (df["Two_Months_kg"] - df["Total_Available_kg"]).apply(lambd
 df["Total_Cost_KES"] = df["Two_Months_kg"] * df["Unit_Rate_KES"]
 df["PO_Cost_KES"] = df["To_Order_kg"] * df["Unit_Rate_KES"]
 
-# Tabs Setup
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Dashboard & Trend Projection",
-    "📑 Supplier Purchase Orders",
-    "📦 Warehouse & Low-Stock Alerts",
-    "📈 Cost Variance (Nov '25 vs June '26)",
-    "🎯 Finished Product Targets",
-    "✏️ Edit BOM & Formulations",
-])
-
-with tab1:
+# Page Routing Based on Sidebar Menu Selection
+if selected_page == "📊 Dashboard & Trend Projection":
     st.subheader("Key Performance Metrics (2-Month Production Target)")
     total_qty = df["Two_Months_kg"].sum()
     total_cost = df["Total_Cost_KES"].sum()
@@ -308,8 +342,27 @@ with tab1:
         st.metric("Import Material Cost", f"KES {total_import_cost:,.2f}")
 
     st.markdown("---")
-    st.subheader("📈 Multi-Month Material Requirement Trend Projection (1M vs 2M vs 3M)")
+    st.subheader("📈 Multi-Month Material Requirement Trend Projection (1M vs 2M vs 3M with % Share)")
 
+    summary_display = df[[
+        "Item", "Source", 
+        "One_Month_kg", "One_Month_Pct", 
+        "Two_Months_kg", "Two_Months_Pct", 
+        "Three_Months_kg", "Three_Months_Pct", 
+        "Unit_Rate_KES", "Total_Cost_KES"
+    ]].copy()
+    
+    summary_display.columns = [
+        "Material Item", "Source",
+        "1M Qty (kg)", "1M Share (%)",
+        "2M Qty (kg)", "2M Share (%)",
+        "3M Qty (kg)", "3M Share (%)",
+        "Rate (KES)", "2M Cost (KES)"
+    ]
+    summary_display = summary_display.round(2)
+    st.dataframe(summary_display.sort_values(by="2M Qty (kg)", ascending=False), use_container_width=True, hide_index=True)
+
+    st.markdown("---")
     trend_melted = df.melt(
         id_vars=["Item", "Source"],
         value_vars=["One_Month_kg", "Two_Months_kg", "Three_Months_kg"],
@@ -342,7 +395,7 @@ with tab1:
     fig_trend.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=50), xaxis_tickangle=-30)
     st.plotly_chart(fig_trend, use_container_width=True)
 
-with tab2:
+elif selected_page == "📑 Supplier Purchase Orders":
     st.subheader("📑 Supplier Purchase Order Generation")
     po_type = st.radio("Select Vendor Purchase Category:", ["All Vendors", "Local", "Import"], horizontal=True, key="po_radio")
     po_df = df[df["Source"] == po_type] if po_type in ["Local", "Import"] else df
@@ -354,7 +407,7 @@ with tab2:
     st.info(f"Total Purchase Order Value ({po_type}): KES {total_po_cost:,.2f}")
     st.dataframe(po_display.sort_values(by="Total PO Cost (KES)", ascending=False), use_container_width=True, hide_index=True)
 
-with tab3:
+elif selected_page == "📦 Warehouse & Low-Stock Alerts":
     st.subheader("📦 Warehouse Stock Audit & Automated Low-Stock Alerts")
     st.markdown("Monitor physical warehouse counts against system records and review automated reorder point alerts.")
 
@@ -383,7 +436,7 @@ with tab3:
     st.info(f"Total Available Inventory Valuation: KES {total_inv_val:,.2f}")
     st.dataframe(stock_display.sort_values(by="Inventory Value (KES)", ascending=False), use_container_width=True, hide_index=True)
 
-with tab4:
+elif selected_page == "📈 Cost Variance (Nov '25 vs June '26)":
     st.subheader("📈 Cost Variance Analysis: Nov 2025 Baseline vs June 2026 Projected")
     var_df = df[["Item", "Source", "Two_Months_kg", "Nov_2025_Rate", "June_2026_Rate"]].copy()
     var_df["Nov_2025_Total_KES"] = var_df["Two_Months_kg"] * var_df["Nov_2025_Rate"]
@@ -411,7 +464,7 @@ with tab4:
     var_display = var_display.round(2)
     st.dataframe(var_display.sort_values(by="Cost Variance (KES)", ascending=False), use_container_width=True, hide_index=True)
 
-with tab5:
+elif selected_page == "🎯 Finished Product Targets":
     st.subheader("🎯 Finished Product Production Targets")
     st.markdown("Configure planned production volume (units/batches) for each finished product across cycles.")
     
@@ -425,54 +478,24 @@ with tab5:
         st.session_state["products_df"] = edited_products
         st.rerun()
 
-with tab6:
-    st.subheader("✏️ Product Dropdown Formulation & BOM Manager")
-    st.markdown("Select a product from the dropdown to view and edit its Bill of Materials (kg required per unit), or add new products.")
+elif selected_page == "✏️ Edit Selected Product BOM":
+    st.subheader(f"✏️ Edit Bill of Materials for: **{selected_product}**")
+    st.markdown("Modify kg required per unit for the selected product in the sidebar.")
 
-    # Product Selector / Creator Controls
-    existing_products = st.session_state["products_df"]["Product"].tolist()
+    product_bom = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] == selected_product].copy()
     
-    col_sel1, col_sel2 = st.columns([2, 1])
-    with col_sel1:
-        selected_product = st.selectbox("Select Finished Product to Edit BOM:", existing_products)
-    with col_sel2:
-        new_prod_name = st.text_input("Or Add New Product Name:")
-        if st.button("➕ Create Product"):
-            if new_prod_name and new_prod_name not in existing_products:
-                # Add to products table with default 0 targets
-                new_row = pd.DataFrame([{"Product": new_prod_name, "Target_1M_Units": 100, "Target_2M_Units": 200, "Target_3M_Units": 300}])
-                st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
-                
-                # Add initial default BOM rows for all raw materials with 0 kg
-                init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in rm_df["Item"]])
-                st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
-                st.success(f"Successfully created product: {new_prod_name}!")
-                st.rerun()
-            elif new_prod_name in existing_products:
-                st.error("Product already exists!")
-
-    st.markdown("---")
+    edited_product_bom = st.data_editor(
+        product_bom[["Item", "Kg_Per_Unit"]],
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"bom_editor_{selected_product}",
+    )
     
-    if selected_product:
-        st.markdown(f"#### Bill of Materials for: **{selected_product}**")
-        
-        # Filter BOM for selected product
-        product_bom = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] == selected_product].copy()
-        
-        edited_product_bom = st.data_editor(
-            product_bom[["Item", "Kg_Per_Unit"]],
-            num_rows="dynamic",
-            use_container_width=True,
-            key=f"bom_editor_{selected_product}",
-        )
-        
-        # Save updates back to session state BOM dataframe
-        if not edited_product_bom.equals(product_bom[["Item", "Kg_Per_Unit"]]):
-            # Reconstruct full bom_df keeping other products untouched
-            edited_product_bom["Product"] = selected_product
-            other_boms = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] != selected_product]
-            st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
-            st.rerun()
+    if not edited_product_bom.equals(product_bom[["Item", "Kg_Per_Unit"]]):
+        edited_product_bom["Product"] = selected_product
+        other_boms = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] != selected_product]
+        st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
+        st.rerun()
 
 # --- Consolidated Excel Export Module ---
 st.markdown("---")
@@ -483,7 +506,7 @@ def generate_consolidated_excel():
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         prod_df.to_excel(writer, sheet_name="Product_Targets", index=False)
         bom_df.to_excel(writer, sheet_name="Bill_Of_Materials", index=False)
-        df[["Item", "Source", "One_Month_kg", "Two_Months_kg", "Three_Months_kg", "Unit_Rate_KES", "Total_Cost_KES"]].round(2).to_excel(writer, sheet_name="Dashboard_Summary", index=False)
+        df[["Item", "Source", "One_Month_kg", "One_Month_Pct", "Two_Months_kg", "Two_Months_Pct", "Three_Months_kg", "Three_Months_Pct", "Unit_Rate_KES", "Total_Cost_KES"]].round(2).to_excel(writer, sheet_name="Dashboard_Summary", index=False)
         df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES"]].assign(
             Total_PO_Cost=lambda r: r["To_Order_kg"] * r["Unit_Rate_KES"]
         ).round(2).to_excel(writer, sheet_name="Purchase_Orders", index=False)
