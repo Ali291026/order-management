@@ -5,7 +5,7 @@ import streamlit as st
 
 # Page Configuration
 st.set_page_config(
-    page_title="Product-Wise Formulation & Production Costing Dashboard",
+    page_title="Multi-Layer Product Formulation & Costing Dashboard",
     page_icon="🏭",
     layout="wide",
 )
@@ -31,7 +31,7 @@ st.markdown(
 )
 
 
-# Initialize Session State for Products, BOMs, and Raw Materials
+# Initialize Session State for Products, Layered BOMs, and Raw Materials
 @st.cache_data
 def load_initial_data():
     raw_materials = [
@@ -178,42 +178,25 @@ def load_initial_data():
     ]
 
     products = [
-        {"Product": "Standard PVC Pipe (Class 1)", "Target_1M_Units": 1000, "Target_2M_Units": 2000, "Target_3M_Units": 3000},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Target_1M_Units": 500, "Target_2M_Units": 1000, "Target_3M_Units": 1500},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Target_1M_Units": 1000, "Target_2M_Units": 2000, "Target_3M_Units": 3000, "Total_Weight_Kg_Per_Unit": 50.0},
     ]
 
+    # Layered BOM Data: Specifying Layer name, Item, and Kg required per unit
     bom_data = [
-        # Product A
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Calcium Stearate", "Kg_Per_Unit": 0.20},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Calcium Carbonate", "Kg_Per_Unit": 25.00},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "OB-1", "Kg_Per_Unit": 0.002},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "SGT-01/PA", "Kg_Per_Unit": 0.80},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Stabilizer", "Kg_Per_Unit": 1.45},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Stearic Acid", "Kg_Per_Unit": 0.12},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "SGT - 13G / SGL24B", "Kg_Per_Unit": 1.75},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "PE Wax", "Kg_Per_Unit": 0.10},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Resin", "Kg_Per_Unit": 2.00},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Epoxy", "Kg_Per_Unit": 0.46},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "DOP", "Kg_Per_Unit": 0.14},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "Titanium Dioxide", "Kg_Per_Unit": 1.39},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "PVC SGT", "Kg_Per_Unit": 21.40},
-        {"Product": "Standard PVC Pipe (Class 1)", "Item": "PVC Nbi", "Kg_Per_Unit": 27.45},
-
-        # Product B
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Calcium Stearate", "Kg_Per_Unit": 0.22},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Calcium Carbonate", "Kg_Per_Unit": 26.90},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "OB-1", "Kg_Per_Unit": 0.0022},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "SGT-01/PA", "Kg_Per_Unit": 0.88},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Stabilizer", "Kg_Per_Unit": 1.54},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Stearic Acid", "Kg_Per_Unit": 0.13},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "SGT - 13G / SGL24B", "Kg_Per_Unit": 1.90},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "PE Wax", "Kg_Per_Unit": 0.11},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Resin", "Kg_Per_Unit": 2.15},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Epoxy", "Kg_Per_Unit": 0.50},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "DOP", "Kg_Per_Unit": 0.15},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "Titanium Dioxide", "Kg_Per_Unit": 1.50},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "PVC SGT", "Kg_Per_Unit": 23.19},
-        {"Product": "Heavy Duty Conduit (Class 2)", "Item": "PVC Nbi", "Kg_Per_Unit": 29.74},
+        # Inner Layer (e.g., 20% of total weight)
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Resin", "Kg_Per_Unit": 5.0},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Stabilizer", "Kg_Per_Unit": 0.5},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Calcium Carbonate", "Kg_Per_Unit": 4.5},
+        
+        # Middle Layer (e.g., 60% of total weight - high filler)
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "PVC Nbi", "Kg_Per_Unit": 15.0},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "Calcium Carbonate", "Kg_Per_Unit": 12.0},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "Resin", "Kg_Per_Unit": 3.0},
+        
+        # Outer Layer (e.g., 20% of total weight - UV resistant / pigment)
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "PVC SGT", "Kg_Per_Unit": 6.0},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "Titanium Dioxide", "Kg_Per_Unit": 2.0},
+        {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "Stabilizer", "Kg_Per_Unit": 2.0},
     ]
 
     return pd.DataFrame(raw_materials), pd.DataFrame(products), pd.DataFrame(bom_data)
@@ -231,15 +214,15 @@ bom_df = st.session_state["bom_df"]
 
 # App Header
 st.markdown(
-    '<p class="main-header">🏭 Product-Wise Formulation & Production Costing Dashboard</p>',
+    '<p class="main-header">🏭 Multi-Layer Product Formulation & Costing Dashboard</p>',
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sub-header">Manage simulation volume, products, raw materials, and navigation from the left sidebar.</p>',
+    '<p class="sub-header">Manage multi-layer product BOMs, analyze compound percentage distribution, and track unit production costs.</p>',
     unsafe_allow_html=True,
 )
 
-# --- SIDEBAR CONTROLS, NAVIGATION & MANAGERS ---
+# --- SIDEBAR CONTROLS & NAVIGATION ---
 st.sidebar.header("🎛️ Global Simulation Controls")
 production_scale = st.sidebar.slider(
     "Production Volume Scale (%)",
@@ -256,82 +239,55 @@ selected_page = st.sidebar.radio(
     "Go to:",
     [
         "📊 Dashboard & Trend Projection",
+        "💰 Product Cost & Unit Pricing",
         "📑 Supplier Purchase Orders",
         "📦 Warehouse & Low-Stock Alerts",
-        "📈 Cost Variance (Nov '25 vs June '26)",
         "🎯 Finished Product Targets",
-        "✏️ Edit Selected Product BOM",
-        "🧪 Raw Material Master Manager",
+        "✏️ Edit Multi-Layer BOM",
     ],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.header("📦 Product & BOM Manager")
+st.sidebar.header("📦 Product & Material Manager")
 
 existing_products = st.session_state["products_df"]["Product"].tolist()
-selected_product = st.sidebar.selectbox("Select Product to Edit BOM:", existing_products)
+selected_product = st.sidebar.selectbox("Select Product to Edit Layers:", existing_products)
 
-with st.sidebar.expander("➕ Add New Finished Product"):
-    new_prod_name = st.text_input("New Product Name:")
+with st.sidebar.expander("➕ Add New Multi-Layer Product"):
+    new_prod_name = st.text_input("Product Name:")
+    new_prod_wt = st.number_input("Total Weight per Unit (kg):", value=50.0)
     if st.button("Create Product"):
         if new_prod_name and new_prod_name not in existing_products:
-            new_row = pd.DataFrame([{"Product": new_prod_name, "Target_1M_Units": 100, "Target_2M_Units": 200, "Target_3M_Units": 300}])
+            new_row = pd.DataFrame([{
+                "Product": new_prod_name, 
+                "Target_1M_Units": 100, 
+                "Target_2M_Units": 200, 
+                "Target_3M_Units": 300,
+                "Total_Weight_Kg_Per_Unit": new_prod_wt
+            }])
             st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
             
-            # Add initial default BOM rows for all current raw materials with 0 kg
+            # Add default layers
             current_rms = st.session_state["raw_materials_df"]["Item"].tolist()
-            init_boms = pd.DataFrame([{"Product": new_prod_name, "Item": item, "Kg_Per_Unit": 0.0} for item in current_rms])
+            init_boms = pd.DataFrame([
+                {"Product": new_prod_name, "Layer": "Outer Layer", "Item": current_rms[0], "Kg_Per_Unit": 0.0}
+            ])
             st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
-            st.success(f"Created Product: {new_prod_name}")
+            st.success(f"Created Multi-Layer Product: {new_prod_name}")
             st.rerun()
-        elif new_prod_name in existing_products:
-            st.error("Product already exists!")
 
-with st.sidebar.expander("➕ Add New Raw Material"):
-    new_rm_name = st.text_input("Raw Material Name:")
-    new_rm_source = st.selectbox("Vendor Source:", ["Local", "Import"], key="new_rm_src")
-    new_rm_rate = st.number_input("Unit Rate (KES):", min_value=0.0, value=100.0, step=10.0)
-    
-    if st.button("Create Raw Material"):
-        current_rms = st.session_state["raw_materials_df"]["Item"].tolist()
-        if new_rm_name and new_rm_name not in current_rms:
-            # 1. Add to Raw Materials Master DataFrame
-            new_rm_row = pd.DataFrame([{
-                "Item": new_rm_name,
-                "Stock_System": 0.0,
-                "Stock_Physical": 0.0,
-                "In_Transit": 0.0,
-                "Unit_Rate_KES": new_rm_rate,
-                "Nov_2025_Rate": new_rm_rate * 0.95,
-                "June_2026_Rate": new_rm_rate,
-                "Source": new_rm_source,
-            }])
-            st.session_state["raw_materials_df"] = pd.concat([st.session_state["raw_materials_df"], new_rm_row], ignore_index=True)
-            
-            # 2. Automatically inject into BOM for ALL existing products with 0.0 kg default
-            all_products = st.session_state["products_df"]["Product"].tolist()
-            new_bom_rows = pd.DataFrame([{
-                "Product": prod,
-                "Item": new_rm_name,
-                "Kg_Per_Unit": 0.0
-            } for prod in all_products])
-            st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], new_bom_rows], ignore_index=True)
-            
-            st.success(f"Added Raw Material: {new_rm_name}")
-            st.rerun()
-        elif new_rm_name in current_rms:
-            st.error("Raw material already exists! Duplicate creation prevented.")
-
-# Calculate total required raw materials based on Product Targets and BOMs
+# --- CALCULATIONS ---
 prod_df["Scaled_1M_Units"] = prod_df["Target_1M_Units"] * scale_multiplier
 prod_df["Scaled_2M_Units"] = prod_df["Target_2M_Units"] * scale_multiplier
 prod_df["Scaled_3M_Units"] = prod_df["Target_3M_Units"] * scale_multiplier
 
+# Merge BOM with Scaled Targets
 merged_demand = pd.merge(bom_df, prod_df, on="Product", how="inner")
 merged_demand["Req_1M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_1M_Units"]
 merged_demand["Req_2M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_2M_Units"]
 merged_demand["Req_3M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_3M_Units"]
 
+# Aggregate raw material demand across all layers and products
 agg_demand = merged_demand.groupby("Item")[["Req_1M_kg", "Req_2M_kg", "Req_3M_kg"]].sum().reset_index()
 df = pd.merge(rm_df, agg_demand, on="Item", how="left").fillna(0)
 
@@ -356,220 +312,89 @@ df["To_Order_kg"] = (df["Two_Months_kg"] - df["Total_Available_kg"]).apply(lambd
 df["Total_Cost_KES"] = df["Two_Months_kg"] * df["Unit_Rate_KES"]
 df["PO_Cost_KES"] = df["To_Order_kg"] * df["Unit_Rate_KES"]
 
-# Page Routing Based on Sidebar Menu Selection
+# --- PAGE ROUTING ---
 if selected_page == "📊 Dashboard & Trend Projection":
-    st.subheader("Key Performance Metrics (2-Month Production Target)")
+    st.subheader("Key Performance Metrics (2-Month Multi-Layer Production)")
     total_qty = df["Two_Months_kg"].sum()
     total_cost = df["Total_Cost_KES"].sum()
-    total_local_cost = df[df["Source"] == "Local"]["Total_Cost_KES"].sum()
-    total_import_cost = df[df["Source"] == "Import"]["Total_Cost_KES"].sum()
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric(
-            "Total 2-Month Req.",
-            f"{total_qty:,.1f} kg",
-            delta=f"{production_scale - 100}% vs Baseline",
-        )
+        st.metric("Total 2-Month Req.", f"{total_qty:,.1f} kg", delta=f"{production_scale - 100}% vs Baseline")
     with col2:
         st.metric("Total Material Cost", f"KES {total_cost:,.2f}")
     with col3:
-        st.metric("Local Material Cost", f"KES {total_local_cost:,.2f}")
-    with col4:
-        st.metric("Import Material Cost", f"KES {total_import_cost:,.2f}")
+        st.metric("Active Products", f"{len(prod_df)}")
 
     st.markdown("---")
-    st.subheader("📈 Multi-Month Material Requirement Trend Projection (1M vs 2M vs 3M with % Share)")
-
+    st.subheader("📈 Aggregated Raw Material Requirements Across Layers")
     summary_display = df[[
-        "Item", "Source", 
-        "One_Month_kg", "One_Month_Pct", 
-        "Two_Months_kg", "Two_Months_Pct", 
-        "Three_Months_kg", "Three_Months_Pct", 
-        "Unit_Rate_KES", "Total_Cost_KES"
+        "Item", "Source", "Two_Months_kg", "Two_Months_Pct", "Unit_Rate_KES", "Total_Cost_KES"
     ]].copy()
-    
-    summary_display.columns = [
-        "Material Item", "Source",
-        "1M Qty (kg)", "1M Share (%)",
-        "2M Qty (kg)", "2M Share (%)",
-        "3M Qty (kg)", "3M Share (%)",
-        "Rate (KES)", "2M Cost (KES)"
-    ]
+    summary_display.columns = ["Material Item", "Source", "2M Qty (kg)", "Share (%)", "Rate (KES)", "2M Cost (KES)"]
     summary_display = summary_display.round(2)
     st.dataframe(summary_display.sort_values(by="2M Qty (kg)", ascending=False), use_container_width=True, hide_index=True)
 
-    st.markdown("---")
-    trend_melted = df.melt(
-        id_vars=["Item", "Source"],
-        value_vars=["One_Month_kg", "Two_Months_kg", "Three_Months_kg"],
-        var_name="Cycle",
-        value_name="Requirement_kg",
-    )
-    trend_melted["Cycle"] = trend_melted["Cycle"].map({
-        "One_Month_kg": "1 Month",
-        "Two_Months_kg": "2 Months",
-        "Three_Months_kg": "3 Months",
-    })
+elif selected_page == "💰 Product Cost & Unit Pricing":
+    st.subheader("💰 Product-Wise Layer Cost & Cost Per Kg Breakdown")
+    st.markdown("Calculates total compound cost per finished product unit and effective cost per kg based on layer formulations.")
 
-    fig_trend = px.bar(
-        trend_melted.sort_values(by="Requirement_kg", ascending=False),
-        x="Item",
-        y="Requirement_kg",
-        color="Cycle",
-        barmode="group",
-        labels={
-            "Item": "Raw Material Item",
-            "Requirement_kg": "Required Quantity (kg)",
-            "Cycle": "Production Cycle",
-        },
-        color_discrete_map={
-            "1 Month": "#93C5FD",
-            "2 Months": "#2563EB",
-            "3 Months": "#1E3A8A",
-        },
-    )
-    fig_trend.update_layout(height=450, margin=dict(l=10, r=10, t=10, b=50), xaxis_tickangle=-30)
-    st.plotly_chart(fig_trend, use_container_width=True)
+    # Calculate cost per unit per product by merging BOM with Raw Material rates
+    bom_with_rates = pd.merge(bom_df, rm_df[["Item", "Unit_Rate_KES"]], on="Item", how="inner")
+    bom_with_rates["Line_Cost_KES"] = bom_with_rates["Kg_Per_Unit"] * bom_with_rates["Unit_Rate_KES"]
+    
+    product_cost_summary = bom_with_rates.groupby("Product").agg(
+        Total_Kg_Per_Unit=("Kg_Per_Unit", "sum"),
+        Total_Cost_Per_Unit_KES=("Line_Cost_KES", "sum")
+    ).reset_index()
+    
+    product_cost_summary["Cost_Per_Kg_KES"] = product_cost_summary["Total_Cost_Per_Unit_KES"] / product_cost_summary["Total_Kg_Per_Unit"]
+    product_cost_summary = product_cost_summary.round(2)
+    
+    st.dataframe(product_cost_summary, use_container_width=True, hide_index=True)
+    
+    st.markdown("---")
+    st.subheader("📋 Layer-by-Layer Breakdown")
+    layer_summary = bom_with_rates.groupby(["Product", "Layer"]).agg(
+        Layer_Kg=("Kg_Per_Unit", "sum"),
+        Layer_Cost_KES=("Line_Cost_KES", "sum")
+    ).reset_index().round(2)
+    st.dataframe(layer_summary, use_container_width=True, hide_index=True)
 
 elif selected_page == "📑 Supplier Purchase Orders":
-    st.subheader("📑 Supplier Purchase Order Generation")
-    po_type = st.radio("Select Vendor Purchase Category:", ["All Vendors", "Local", "Import"], horizontal=True, key="po_radio")
-    po_df = df[df["Source"] == po_type] if po_type in ["Local", "Import"] else df
-
-    po_display = po_df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES", "PO_Cost_KES"]].copy()
-    po_display.columns = ["Material Item", "Vendor Category", "Order Qty (kg)", "Unit Rate (KES/kg)", "Total PO Cost (KES)"]
-    po_display = po_display.round(2)
-    total_po_cost = po_display["Total PO Cost (KES)"].sum()
-    st.info(f"Total Purchase Order Value ({po_type}): KES {total_po_cost:,.2f}")
-    st.dataframe(po_display.sort_values(by="Total PO Cost (KES)", ascending=False), use_container_width=True, hide_index=True)
+    st.subheader("📑 Supplier Purchase Orders")
+    po_display = df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES", "PO_Cost_KES"]].copy()
+    po_display.columns = ["Material Item", "Vendor", "Order Qty (kg)", "Rate (KES)", "Total PO Cost (KES)"]
+    st.dataframe(po_display.round(2), use_container_width=True, hide_index=True)
 
 elif selected_page == "📦 Warehouse & Low-Stock Alerts":
-    st.subheader("📦 Warehouse Stock Audit & Automated Low-Stock Alerts")
-    st.markdown("Monitor physical warehouse counts against system records and review automated reorder point alerts.")
-
-    stock_df = df[["Item", "Source", "Stock_System", "Effective_Stock", "In_Transit", "Total_Available_kg", "Unit_Rate_KES", "To_Order_kg"]].copy()
-    stock_df["Variance (kg)"] = stock_df["Effective_Stock"] - stock_df["Stock_System"]
-    stock_df["Inventory Value (KES)"] = stock_df["Total_Available_kg"] * stock_df["Unit_Rate_KES"]
-
-    stock_df["Stock Status"] = stock_df.apply(
-        lambda r: "🚨 CRITICAL LOW STOCK" if r["Total_Available_kg"] < (r["To_Order_kg"] * 0.5) else (
-            "⚠️ Reorder Recommended" if r["Total_Available_kg"] < r["To_Order_kg"] else "✅ Adequate Stock"
-        ),
-        axis=1,
-    )
-
-    low_stock_items = stock_df[stock_df["Stock Status"].isin(["🚨 CRITICAL LOW STOCK", "⚠️ Reorder Recommended"])]
-    if not low_stock_items.empty:
-        st.warning(f"⚠️ Inventory Alert: {len(low_stock_items)} material items require attention based on current production targets.")
-    else:
-        st.success("✅ All warehouse stock levels are currently adequate.")
-
-    stock_display = stock_df[["Item", "Source", "Stock_System", "Effective_Stock", "In_Transit", "Total_Available_kg", "Stock Status", "Inventory Value (KES)"]].copy()
-    stock_display.columns = ["Material Item", "Source", "System Stock (kg)", "Physical Count (kg)", "In Transit (kg)", "Total Available (kg)", "Stock Status", "Inventory Value (KES)"]
-    stock_display = stock_display.round(2)
-
-    total_inv_val = stock_display["Inventory Value (KES)"].sum()
-    st.info(f"Total Available Inventory Valuation: KES {total_inv_val:,.2f}")
-    st.dataframe(stock_display.sort_values(by="Inventory Value (KES)", ascending=False), use_container_width=True, hide_index=True)
-
-elif selected_page == "📈 Cost Variance (Nov '25 vs June '26)":
-    st.subheader("📈 Cost Variance Analysis: Nov 2025 Baseline vs June 2026 Projected")
-    var_df = df[["Item", "Source", "Two_Months_kg", "Nov_2025_Rate", "June_2026_Rate"]].copy()
-    var_df["Nov_2025_Total_KES"] = var_df["Two_Months_kg"] * var_df["Nov_2025_Rate"]
-    var_df["June_2026_Total_KES"] = var_df["Two_Months_kg"] * var_df["June_2026_Rate"]
-    var_df["Rate Variance (KES)"] = var_df["June_2026_Rate"] - var_df["Nov_2025_Rate"]
-    var_df["Pct Variance (%)"] = ((var_df["Rate Variance (KES)"] / var_df["Nov_2025_Rate"]) * 100).round(2)
-    var_df["Total Cost Variance (KES)"] = var_df["June_2026_Total_KES"] - var_df["Nov_2025_Total_KES"]
-
-    total_nov_cost = var_df["Nov_2025_Total_KES"].sum()
-    total_jun_cost = var_df["June_2026_Total_KES"].sum()
-    total_variance_cost = total_jun_cost - total_nov_cost
-
-    col_v1, col_v2, col_v3 = st.columns(3)
-    with col_v1:
-        st.metric("Nov 2025 Baseline Cost", f"KES {total_nov_cost:,.2f}")
-    with col_v2:
-        st.metric("June 2026 Projected Cost", f"KES {total_jun_cost:,.2f}", delta=f"KES {total_variance_cost:,.2f}", delta_color="inverse")
-    with col_v3:
-        overall_pct = (total_variance_cost / total_nov_cost) * 100
-        st.metric("Overall Cost Variance", f"{overall_pct:+.2f}%")
-
-    st.markdown("---")
-    var_display = var_df[["Item", "Source", "Nov_2025_Rate", "June_2026_Rate", "Pct Variance (%)", "Total Cost Variance (KES)"]].copy()
-    var_display.columns = ["Material Item", "Source", "Nov '25 Rate (KES)", "June '26 Rate (KES)", "Rate Variance (%)", "Cost Variance (KES)"]
-    var_display = var_display.round(2)
-    st.dataframe(var_display.sort_values(by="Cost Variance (KES)", ascending=False), use_container_width=True, hide_index=True)
+    st.subheader("📦 Warehouse Stock Audit")
+    stock_display = df[["Item", "Source", "Stock_System", "Total_Available_kg", "To_Order_kg"]].copy()
+    stock_display.columns = ["Material", "Source", "System Stock", "Available", "Required Order"]
+    st.dataframe(stock_display.round(2), use_container_width=True, hide_index=True)
 
 elif selected_page == "🎯 Finished Product Targets":
     st.subheader("🎯 Finished Product Production Targets")
-    st.markdown("Configure planned production volume (units/batches) for each finished product across cycles.")
-    
-    edited_products = st.data_editor(
-        st.session_state["products_df"],
-        num_rows="dynamic",
-        use_container_width=True,
-        key="products_editor",
-    )
+    edited_products = st.data_editor(st.session_state["products_df"], num_rows="dynamic", use_container_width=True)
     if not edited_products.equals(st.session_state["products_df"]):
         st.session_state["products_df"] = edited_products
         st.rerun()
 
-elif selected_page == "✏️ Edit Selected Product BOM":
-    st.subheader(f"✏️ Edit Bill of Materials for: **{selected_product}**")
-    st.markdown("Modify kg required per unit for the selected product in the sidebar.")
+elif selected_page == "✏️ Edit Multi-Layer BOM":
+    st.subheader(f"✏️ Edit Layers & Formulations for: **{selected_product}**")
+    st.markdown("Define layers (e.g., Inner, Middle, Outer), compound items, and kg required per unit.")
 
     product_bom = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] == selected_product].copy()
     
     edited_product_bom = st.data_editor(
-        product_bom[["Item", "Kg_Per_Unit"]],
+        product_bom[["Layer", "Item", "Kg_Per_Unit"]],
         num_rows="dynamic",
         use_container_width=True,
-        key=f"bom_editor_{selected_product}",
+        key=f"layer_bom_editor_{selected_product}",
     )
     
-    if not edited_product_bom.equals(product_bom[["Item", "Kg_Per_Unit"]]):
+    if not edited_product_bom.equals(product_bom[["Layer", "Item", "Kg_Per_Unit"]]):
         edited_product_bom["Product"] = selected_product
         other_boms = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] != selected_product]
         st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
         st.rerun()
-
-elif selected_page == "🧪 Raw Material Master Table":
-    st.subheader("🧪 Raw Material Master Table & Rates")
-    st.markdown("Edit raw material unit rates, sources, and system stock levels directly below.")
-    
-    edited_rm = st.data_editor(
-        st.session_state["raw_materials_df"],
-        num_rows="dynamic",
-        use_container_width=True,
-        key="rm_master_editor",
-    )
-    if not edited_rm.equals(st.session_state["raw_materials_df"]):
-        st.session_state["raw_materials_df"] = edited_rm
-        st.rerun()
-
-# --- Consolidated Excel Export Module ---
-st.markdown("---")
-st.subheader("📥 Export Consolidated Workbook")
-
-def generate_consolidated_excel():
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        prod_df.to_excel(writer, sheet_name="Product_Targets", index=False)
-        bom_df.to_excel(writer, sheet_name="Bill_Of_Materials", index=False)
-        rm_df.to_excel(writer, sheet_name="Raw_Materials_Master", index=False)
-        df[["Item", "Source", "One_Month_kg", "One_Month_Pct", "Two_Months_kg", "Two_Months_Pct", "Three_Months_kg", "Three_Months_Pct", "Unit_Rate_KES", "Total_Cost_KES"]].round(2).to_excel(writer, sheet_name="Dashboard_Summary", index=False)
-        df[["Item", "Source", "To_Order_kg", "Unit_Rate_KES"]].assign(
-            Total_PO_Cost=lambda r: r["To_Order_kg"] * r["Unit_Rate_KES"]
-        ).round(2).to_excel(writer, sheet_name="Purchase_Orders", index=False)
-        stock_df.round(2).to_excel(writer, sheet_name="Warehouse_Stock", index=False)
-        var_df.round(2).to_excel(writer, sheet_name="Cost_Variance", index=False)
-    output.seek(0)
-    return output.getvalue()
-
-st.download_button(
-    label="📥 Download Consolidated Multi-Tab Excel Workbook (.xlsx)",
-    data=generate_consolidated_excel(),
-    file_name="product_wise_costing_dashboard.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
