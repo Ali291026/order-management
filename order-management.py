@@ -181,19 +181,13 @@ def load_initial_data():
         {"Product": "3-Layer PVC Pipe (Standard)", "Target_1M_Units": 1000, "Target_2M_Units": 2000, "Target_3M_Units": 3000, "Total_Weight_Kg_Per_Unit": 50.0},
     ]
 
-    # Layered BOM Data: Specifying Layer name, Item, and Kg required per unit
     bom_data = [
-        # Inner Layer (e.g., 20% of total weight)
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Resin", "Kg_Per_Unit": 5.0},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Stabilizer", "Kg_Per_Unit": 0.5},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Inner Layer", "Item": "Calcium Carbonate", "Kg_Per_Unit": 4.5},
-        
-        # Middle Layer (e.g., 60% of total weight - high filler)
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "PVC Nbi", "Kg_Per_Unit": 15.0},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "Calcium Carbonate", "Kg_Per_Unit": 12.0},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Middle Layer", "Item": "Resin", "Kg_Per_Unit": 3.0},
-        
-        # Outer Layer (e.g., 20% of total weight - UV resistant / pigment)
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "PVC SGT", "Kg_Per_Unit": 6.0},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "Titanium Dioxide", "Kg_Per_Unit": 2.0},
         {"Product": "3-Layer PVC Pipe (Standard)", "Layer": "Outer Layer", "Item": "Stabilizer", "Kg_Per_Unit": 2.0},
@@ -218,7 +212,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 st.markdown(
-    '<p class="sub-header">Manage multi-layer product BOMs, analyze compound percentage distribution, and track unit production costs.</p>',
+    '<p class="sub-header">Manage multi-layer product BOMs, compound distributions, and unit production costs.</p>',
     unsafe_allow_html=True,
 )
 
@@ -244,16 +238,17 @@ selected_page = st.sidebar.radio(
         "📦 Warehouse & Low-Stock Alerts",
         "🎯 Finished Product Targets",
         "✏️ Edit Multi-Layer BOM",
+        "🧪 Raw Material Master",
     ],
 )
 
 st.sidebar.markdown("---")
-st.sidebar.header("📦 Product & Material Manager")
+st.sidebar.header("📦 Product Manager")
 
 existing_products = st.session_state["products_df"]["Product"].tolist()
 selected_product = st.sidebar.selectbox("Select Product to Edit Layers:", existing_products)
 
-with st.sidebar.expander("➕ Add New Multi-Layer Product"):
+with st.sidebar.expander("➕ Add New Finished Product"):
     new_prod_name = st.text_input("Product Name:")
     new_prod_wt = st.number_input("Total Weight per Unit (kg):", value=50.0)
     if st.button("Create Product"):
@@ -267,13 +262,13 @@ with st.sidebar.expander("➕ Add New Multi-Layer Product"):
             }])
             st.session_state["products_df"] = pd.concat([st.session_state["products_df"], new_row], ignore_index=True)
             
-            # Add default layers
+            # Add initial default layer item
             current_rms = st.session_state["raw_materials_df"]["Item"].tolist()
-            init_boms = pd.DataFrame([
-                {"Product": new_prod_name, "Layer": "Outer Layer", "Item": current_rms[0], "Kg_Per_Unit": 0.0}
-            ])
+            init_boms = pd.DataFrame([{
+                "Product": new_prod_name, "Layer": "Inner Layer", "Item": current_rms[0], "Kg_Per_Unit": 0.0
+            }])
             st.session_state["bom_df"] = pd.concat([st.session_state["bom_df"], init_boms], ignore_index=True)
-            st.success(f"Created Multi-Layer Product: {new_prod_name}")
+            st.success(f"Created Product: {new_prod_name}")
             st.rerun()
 
 # --- CALCULATIONS ---
@@ -281,13 +276,11 @@ prod_df["Scaled_1M_Units"] = prod_df["Target_1M_Units"] * scale_multiplier
 prod_df["Scaled_2M_Units"] = prod_df["Target_2M_Units"] * scale_multiplier
 prod_df["Scaled_3M_Units"] = prod_df["Target_3M_Units"] * scale_multiplier
 
-# Merge BOM with Scaled Targets
 merged_demand = pd.merge(bom_df, prod_df, on="Product", how="inner")
 merged_demand["Req_1M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_1M_Units"]
 merged_demand["Req_2M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_2M_Units"]
 merged_demand["Req_3M_kg"] = merged_demand["Kg_Per_Unit"] * merged_demand["Scaled_3M_Units"]
 
-# Aggregate raw material demand across all layers and products
 agg_demand = merged_demand.groupby("Item")[["Req_1M_kg", "Req_2M_kg", "Req_3M_kg"]].sum().reset_index()
 df = pd.merge(rm_df, agg_demand, on="Item", how="left").fillna(0)
 
@@ -339,7 +332,6 @@ elif selected_page == "💰 Product Cost & Unit Pricing":
     st.subheader("💰 Product-Wise Layer Cost & Cost Per Kg Breakdown")
     st.markdown("Calculates total compound cost per finished product unit and effective cost per kg based on layer formulations.")
 
-    # Calculate cost per unit per product by merging BOM with Raw Material rates
     bom_with_rates = pd.merge(bom_df, rm_df[["Item", "Unit_Rate_KES"]], on="Item", how="inner")
     bom_with_rates["Line_Cost_KES"] = bom_with_rates["Kg_Per_Unit"] * bom_with_rates["Unit_Rate_KES"]
     
@@ -350,11 +342,10 @@ elif selected_page == "💰 Product Cost & Unit Pricing":
     
     product_cost_summary["Cost_Per_Kg_KES"] = product_cost_summary["Total_Cost_Per_Unit_KES"] / product_cost_summary["Total_Kg_Per_Unit"]
     product_cost_summary = product_cost_summary.round(2)
-    
     st.dataframe(product_cost_summary, use_container_width=True, hide_index=True)
     
     st.markdown("---")
-    st.subheader("📋 Layer-by-Layer Breakdown")
+    st.subheader("📋 Layer-by-Layer Breakdown Summary")
     layer_summary = bom_with_rates.groupby(["Product", "Layer"]).agg(
         Layer_Kg=("Kg_Per_Unit", "sum"),
         Layer_Cost_KES=("Line_Cost_KES", "sum")
@@ -381,8 +372,10 @@ elif selected_page == "🎯 Finished Product Targets":
         st.rerun()
 
 elif selected_page == "✏️ Edit Multi-Layer BOM":
-    st.subheader(f"✏️ Edit Layers & Formulations for: **{selected_product}**")
-    st.markdown("Define layers (e.g., Inner, Middle, Outer), compound items, and kg required per unit.")
+    st.subheader(f"✏️ Multi-Layer BOM Formulations for: **{selected_product}**")
+    st.markdown(
+        "Define your layers (e.g., **Inner Layer**, **Middle Layer**, **Outer Layer**), select raw material items, and specify kg required per unit."
+    )
 
     product_bom = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] == selected_product].copy()
     
@@ -398,3 +391,31 @@ elif selected_page == "✏️ Edit Multi-Layer BOM":
         other_boms = st.session_state["bom_df"][st.session_state["bom_df"]["Product"] != selected_product]
         st.session_state["bom_df"] = pd.concat([other_boms, edited_product_bom], ignore_index=True)
         st.rerun()
+
+elif selected_page == "🧪 Raw Material Master":
+    st.subheader("🧪 Raw Material Master & Rates")
+    edited_rm = st.data_editor(st.session_state["raw_materials_df"], num_rows="dynamic", use_container_width=True)
+    if not edited_rm.equals(st.session_state["raw_materials_df"]):
+        st.session_state["raw_materials_df"] = edited_rm
+        st.rerun()
+
+# --- Consolidated Excel Export Module ---
+st.markdown("---")
+st.subheader("📥 Export Consolidated Workbook")
+
+def generate_consolidated_excel():
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        prod_df.to_excel(writer, sheet_name="Product_Targets", index=False)
+        bom_df.to_excel(writer, sheet_name="Multi_Layer_BOM", index=False)
+        rm_df.to_excel(writer, sheet_name="Raw_Materials_Master", index=False)
+        df[["Item", "Source", "One_Month_kg", "One_Month_Pct", "Two_Months_kg", "Two_Months_Pct", "Three_Months_kg", "Three_Months_Pct", "Unit_Rate_KES", "Total_Cost_KES"]].round(2).to_excel(writer, sheet_name="Dashboard_Summary", index=False)
+    output.seek(0)
+    return output.getvalue()
+
+st.download_button(
+    label="📥 Download Consolidated Multi-Tab Excel Workbook (.xlsx)",
+    data=generate_consolidated_excel(),
+    file_name="multilayer_costing_dashboard.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
